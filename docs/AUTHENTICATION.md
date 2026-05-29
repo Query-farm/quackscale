@@ -106,7 +106,7 @@ Create keys with `headscale preauthkeys create`. Full walkthrough: **[HEADSCALE.
 | Workflow | Control plane |
 |----------|----------------|
 | [headscale-integration.yml](../.github/workflows/headscale-integration.yml) | Docker Headscale + `CALL tailscale_up` |
-| [headscale-e2e.yml](../.github/workflows/headscale-e2e.yml) | Two-node QuackTail e2e (shared token, discover, INSERT/SELECT) |
+| [headscale-e2e.yml](../.github/workflows/headscale-e2e.yml) | Two-node QuackTail e2e (linux, manual dispatch) |
 | [libtailscale-integration.yml](../.github/workflows/libtailscale-integration.yml) | libtailscale `tstestcontrol` (`go test`) |
 
 ## SQL surface (Tailscale only)

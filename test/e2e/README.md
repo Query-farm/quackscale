@@ -4,7 +4,11 @@ End-to-end validation for **two DuckDB nodes** on a [Headscale](https://github.c
 
 ## What runs in CI
 
-[`.github/workflows/headscale-e2e.yml`](../.github/workflows/headscale-e2e.yml) executes [`scripts/ci_headscale_e2e.sh`](../scripts/ci_headscale_e2e.sh):
+[`.github/workflows/headscale-e2e.yml`](../.github/workflows/headscale-e2e.yml) is **manual only** (`workflow_dispatch`) on **linux** (`ubuntu-latest`) — the full DuckDB + extension build is too slow to run on every push.
+
+Trigger from GitHub: **Actions → Headscale QuackTail e2e → Run workflow**.
+
+The workflow runs [`scripts/ci_headscale_e2e.sh`](../scripts/ci_headscale_e2e.sh):
 
 | Step | Node | Validates |
 |------|------|-----------|

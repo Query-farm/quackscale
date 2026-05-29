@@ -80,7 +80,7 @@ Then run the smoke script (after `make release`):
 |----------|-------------------|
 | [libtailscale-integration.yml](../.github/workflows/libtailscale-integration.yml) | libtailscale `go test` (tstestcontrol) |
 | [headscale-integration.yml](../.github/workflows/headscale-integration.yml) | Headscale + `CALL tailscale_up` smoke |
-| [headscale-e2e.yml](../.github/workflows/headscale-e2e.yml) | Two-node QuackTail: shared token, discover, INSERT/SELECT over Quack |
+| [headscale-e2e.yml](../.github/workflows/headscale-e2e.yml) | Two-node QuackTail e2e (linux, `workflow_dispatch` only) |
 
 ## Notes
 
