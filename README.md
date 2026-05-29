@@ -91,7 +91,7 @@ CALL tailscale_up(
 
 -- 2) Serve Quack on the tailnet (port 9494) with the shared token
 CALL quack_serve(
-    quack_uri(),
+    'quack:0.0.0.0:9494',
     allow_other_hostname => true,
     token => quack_token()
 );
@@ -100,7 +100,7 @@ CALL quack_serve(
 CALL quack_discover();
 ```
 
-`quack_uri()` picks MagicDNS hostname when set, else first tailnet IP. `quack_token()` reads `QUACK_TAILNET_TOKEN` or `QUACK_TOKEN`.
+`quack_uri()` and `quack_discover()` advertise how **clients** reach the server (MagicDNS hostname or tailnet IP). **Bind** on `0.0.0.0:9494` so Quack listens on all interfaces after `tailscale_up`. `quack_token()` reads `QUACK_TAILNET_TOKEN` or `QUACK_TOKEN`.
 
 ## Quick start — QuackTail client
 
@@ -177,7 +177,7 @@ Load with `LOAD quackscale;`. Use **`CALL`** for table functions (same style as 
 
 | Function | Description |
 |----------|-------------|
-| `quack_uri()` | Listen URI for `CALL quack_serve` — `quack:<host>:9494` |
+| `quack_uri()` | Client-facing `quack:<host>:9494` for discovery/ATTACH (bind with `quack:0.0.0.0:9494`) |
 | `quack_token()` | Shared Quack token from `QUACK_TAILNET_TOKEN` / `QUACK_TOKEN` env |
 | `CALL quack_discover()` | All `quack:` URIs this node advertises (`magicdns` / `tailnet_ip`) |
 

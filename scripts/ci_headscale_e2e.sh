@@ -187,15 +187,7 @@ LOAD quack;
 
 SQL
   headscale_ci_sql_tailscale_up "$SERVER_HOST" "$SERVER_STATE" "$AUTHKEY"
-  cat <<SQL
-
--- Listen on all interfaces; clients reach the server via tailnet IP or MagicDNS.
-CALL quack_serve(
-    'quack:0.0.0.0:${QUACK_PORT}',
-    allow_other_hostname => true,
-    token => quack_token()
-);
-SQL
+  headscale_ci_sql_quack_serve "$QUACK_PORT"
 } >"$WORK/server_serve.sql"
 
 echo "=== Starting Quack listener on server ==="

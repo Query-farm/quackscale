@@ -405,3 +405,15 @@ headscale_ci_quack_client_uri() {
   local port="${2:-9494}"
   echo "quack:$(headscale_ci_tailnet_fqdn "$hostname"):${port}"
 }
+
+# Bind Quack on all interfaces (required for tailnet/tsnet; do not bind tailnet IP or MagicDNS name).
+headscale_ci_sql_quack_serve() {
+  local port="${1:-9494}"
+  cat <<SQL
+CALL quack_serve(
+    'quack:0.0.0.0:${port}',
+    allow_other_hostname => true,
+    token => quack_token()
+);
+SQL
+}

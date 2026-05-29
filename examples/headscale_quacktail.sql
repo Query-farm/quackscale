@@ -24,11 +24,11 @@ CALL tailscale_up(
 );
 
 CALL quack_serve(
-    quack_uri(),
+    'quack:0.0.0.0:9494',
     allow_other_hostname => true,
     token => quack_token()
 );
 
 CALL quack_discover();
 
--- Clients: same QUACK_TAILNET_TOKEN, ATTACH quack:<hostname>:9494 (DISABLE_SSL true for http-only labs)
+-- Clients: ATTACH quack:<hostname>.<your-base-domain>:9494 (or tailnet IP); DISABLE_SSL true for http-only labs
