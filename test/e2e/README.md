@@ -5,7 +5,7 @@ Two DuckDB containers join **Headscale** via `tailscale_up`. Quack listens on **
 ## Flow
 
 1. **Server:** `tailscale_up` → `quack_serve('quack:127.0.0.1:9494', allow_other_hostname => true, …)` → `CALL tailscale_serve_local(port => 9494)`
-2. **Client:** join tailnet (phase 1) → wait → reconnect → `ATTACH 'quack:<server-tailnet-ip>:9494'` with `DISABLE_SSL true`
+2. **Client:** one DuckDB session — `tailscale_up` → `ATTACH 'quack:<server-tailnet-ip>:9494'` → queries (tsnet stays up for the whole session)
 
 Quack stays local; quackscale uses libtailscale `SetServeConfig` TCP forward (same idea as `tailscale serve --tcp=9494 localhost:9494`).
 
@@ -14,8 +14,7 @@ Quack stays local; quackscale uses libtailscale `SetServeConfig` TCP forward (sa
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `E2E_QUACK_ATTACH_HOST` | `ip` | Client URI (`magicdns` when tsnet accepts tailnet DNS) |
-| `E2E_CLIENT_MESH_WAIT_SEC` | `15` | Pause after client phase-1 `tailscale_up` before ATTACH |
-| `E2E_TAILNET_MESH_WAIT_SEC` | `15` | Pause after nodes register |
+| `E2E_TAILNET_MESH_WAIT_SEC` | `15` | Pause after server ready, before client container starts |
 
 ## Run
 

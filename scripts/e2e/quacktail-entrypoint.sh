@@ -43,18 +43,11 @@ run_server() {
 
 run_client() {
   ensure_quack
-  local mesh_wait="${E2E_CLIENT_MESH_WAIT_SEC:-15}"
-  if [[ ! -f "${WORK}/client_join.sql" || ! -f "${WORK}/client.sql" ]]; then
-    echo "error: missing ${WORK}/client_join.sql or client.sql" >&2
+  if [[ ! -f "${WORK}/client.sql" ]]; then
+    echo "error: missing ${WORK}/client.sql" >&2
     exit 1
   fi
-  echo "=== client join SQL ==="
-  cat "${WORK}/client_join.sql"
-  echo "=== joining tailnet (phase 1) ==="
-  "$DUCKDB" :memory: -batch -echo -f "${WORK}/client_join.sql"
-  echo "Waiting ${mesh_wait}s for client tailnet data plane ..."
-  sleep "$mesh_wait"
-  echo "=== client SQL (phase 2) ==="
+  echo "=== client SQL (single DuckDB session: tailscale_up → ATTACH → queries) ==="
   cat "${WORK}/client.sql"
   exec "$DUCKDB" :memory: -batch -echo -f "${WORK}/client.sql"
 }
