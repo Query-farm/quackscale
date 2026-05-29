@@ -52,8 +52,8 @@ quacktail_wait_quack_endpoint() {
   local port="${2:?port}"
   local token="${3:-}"
   local label="${4:-Quack endpoint}"
-  local attempts="${5:-${E2E_CROSS_NODE_GATE_ATTEMPTS:-60}}"
-  local poll_sec="${6:-${E2E_CROSS_NODE_POLL_SEC:-2}}"
+  local attempts="${5:-${E2E_CROSS_NODE_GATE_ATTEMPTS:-10}}"
+  local poll_sec="${6:-${E2E_CROSS_NODE_POLL_SEC:-1}}"
   local quiet="${QUACKTAIL_QUIET:-0}"
   local i
 

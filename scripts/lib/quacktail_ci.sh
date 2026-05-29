@@ -234,7 +234,7 @@ quacktail_ci_start_client() {
 }
 
 quacktail_ci_wait_client() {
-  local timeout_sec="${1:-${E2E_CLIENT_TIMEOUT_SEC:-180}}"
+  local timeout_sec="${1:-${E2E_CLIENT_TIMEOUT_SEC:-60}}"
   local exit_code=0
   if ! exit_code="$(timeout "$timeout_sec" docker wait "$QUACKTAIL_CLIENT_CONTAINER" 2>/dev/null)"; then
     local rc=$?

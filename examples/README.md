@@ -53,14 +53,14 @@ Three services: `headscale`, `quacktail-server`, `quacktail-client` (test profil
 ```
 → waiting for quacktail-server on tailnet ...
 ✓ quacktail-server on tailnet
-→ waiting for quacktail-server Quack ...
-✓ quacktail-server Quack ready
 → join tailnet as quacktail-client, ATTACH quack:100.64.x.x:9494, verify read/write ...
 
-(tailscale_status, Success, PASSED summary)
+(tailscale_status, Success, PASSED summary — typically under 10s)
 
 ✓ Demo passed — two-node QuackTail cluster is working
 ```
+
+If the client step hangs or exceeds ~30s, the demo fails fast with a timeout and tails `/work/client-tsnet.log` (libtailscale detail).
 
 That confirms: tailnet join, `ATTACH`, read from server, write from client.
 
