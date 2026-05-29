@@ -12,14 +12,6 @@ on:
       - 'src/**'
       - 'cmake/**'
       - 'third_party/libtailscale/**'
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/headscale-integration.yml'
-      - 'scripts/ci_headscale_smoke.sh'
-      - 'test/headscale/**'
-      - 'src/**'
-      - 'cmake/**'
 
 jobs:
   headscale-smoke:
