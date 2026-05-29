@@ -33,12 +33,16 @@ cleanup() {
 trap cleanup EXIT
 
 if [[ ! -x "$DUCKDB" ]]; then
-  echo "error: DuckDB not found at $DUCKDB (run: GEN=ninja make release)" >&2
+  echo "error: DuckDB not found at '$DUCKDB'" >&2
+  echo "Download a release bundle: eval \"\$(./scripts/ci_download_release_duckdb.sh [tag])\"" >&2
+  echo "Or build locally: GEN=ninja make release && export DUCKDB=$ROOT/build/release/duckdb" >&2
   exit 1
 fi
 
-echo "Ensuring quack extension is available..."
+echo "Using DuckDB: $DUCKDB"
+
 if ! "$DUCKDB" -c "LOAD quack; SELECT 1;" >/dev/null 2>&1; then
+  echo "Installing quack from DuckDB core ..."
   if ! "$DUCKDB" -c "INSTALL quack FROM core; LOAD quack; SELECT 1;" >/dev/null 2>&1; then
     "$DUCKDB" -c "INSTALL quack FROM core_nightly; LOAD quack; SELECT 1;"
   fi

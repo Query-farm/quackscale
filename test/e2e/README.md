@@ -2,31 +2,47 @@
 
 End-to-end validation for **two DuckDB nodes** on a [Headscale](https://github.com/juanfont/headscale) tailnet using the core **`quack`** extension and **`quackscale`**.
 
-## What runs in CI
+## Release binaries (required for CI)
 
-[`.github/workflows/headscale-e2e.yml`](../.github/workflows/headscale-e2e.yml) is **manual only** (`workflow_dispatch`) on **linux** (`ubuntu-latest`) — the full DuckDB + extension build is too slow to run on every push.
+QuackScale is **not** in the community extension repository yet. CI e2e does **not** compile from source.
 
-Trigger from GitHub: **Actions → Headscale QuackTail e2e → Run workflow**.
+1. Publish a [GitHub release](https://github.com/quackscience/duckdb-quackscale/releases) (triggers [`.github/workflows/Release.yml`](../.github/workflows/Release.yml)).
+2. The workflow attaches `quacktail-linux-amd64-<tag>.tar.gz` — DuckDB **v1.5.3** with **quackscale** embedded.
+3. E2e downloads that asset and runs `INSTALL quack FROM core` for the published **quack** extension.
 
-The workflow runs [`scripts/ci_headscale_e2e.sh`](../scripts/ci_headscale_e2e.sh):
+## Manual e2e (GitHub Actions)
+
+[`.github/workflows/headscale-e2e.yml`](../.github/workflows/headscale-e2e.yml) — **`workflow_dispatch` only**, linux.
+
+**Actions → Headscale QuackTail e2e → Run workflow**
+
+Optional input: **release tag** (default `latest`).
+
+## Local run
+
+With a published release:
+
+```sh
+eval "$(./scripts/ci_download_release_duckdb.sh v0.1.0)"   # or latest
+./scripts/ci_headscale_e2e.sh
+```
+
+Or after a local build:
+
+```sh
+export DUCKDB=$PWD/build/release/duckdb
+./scripts/ci_headscale_e2e.sh
+```
+
+Docker must be running. Set `QUACK_TAILNET_TOKEN` to override the default shared test token.
+
+## What the e2e script validates
 
 | Step | Node | Validates |
 |------|------|-----------|
 | Headscale Docker | control plane | Preauth key, node registration |
 | Server | `quacktail-server` | `tailscale_up`, `quack_token()`, `quack_serve`, `quack_discover` |
 | Client | `quacktail-client` | `tailscale_up`, shared-token `CREATE SECRET`, `quack_discover`, `ATTACH`, `INSERT`, `SELECT` |
-
-Requires **DuckDB v1.5.3+** so `INSTALL quack FROM core` is available (CI pins the `duckdb` submodule to `v1.5.3` for this job only).
-
-## Local run
-
-```sh
-cd duckdb && git checkout v1.5.3 && cd ..
-GEN=ninja make release
-./scripts/ci_headscale_e2e.sh
-```
-
-Docker must be running. Set `QUACK_TAILNET_TOKEN` to override the default shared test token.
 
 ## Related
 

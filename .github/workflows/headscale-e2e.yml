@@ -1,40 +1,37 @@
-# Two-node QuackTail e2e: Headscale + server/client DuckDB over Quack (shared token).
-# Linux-only, on-demand — full DuckDB + extension build is slow (~30–60 min).
+# Two-node QuackTail e2e over Headscale. Manual only — uses pre-built release binaries.
 name: Headscale QuackTail e2e
 
 on:
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'GitHub release tag (leave empty for latest)'
+        required: false
+        default: latest
+        type: string
+
+permissions:
+  contents: read
 
 jobs:
   quacktail-e2e:
-    name: Headscale two-node QuackTail e2e (linux)
+    name: Headscale QuackTail e2e (linux)
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 30
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: recursive
 
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.25.5'
-
-      - name: Pin DuckDB v1.5.3 (Quack core extension)
+      - name: Download QuackTail release binary
+        env:
+          QUACKTAIL_RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
-          cd duckdb
-          git fetch --tags --depth 1 origin tag v1.5.3
-          git checkout v1.5.3
-
-      - name: Install build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential cmake ninja-build ccache curl python3
-
-      - name: Build QuackScale (DuckDB v1.5.3)
-        run: GEN=ninja make release
+          chmod +x scripts/ci_download_release_duckdb.sh
+          eval "$(./scripts/ci_download_release_duckdb.sh "${{ inputs.release_tag }}")"
+          echo "DUCKDB=$DUCKDB" >> "$GITHUB_ENV"
+          "$DUCKDB" -version || "$DUCKDB" --version
 
       - name: Run Headscale QuackTail e2e
         run: |
-          chmod +x scripts/ci_headscale_e2e.sh scripts/ci_headscale_smoke.sh scripts/lib/headscale_ci.sh
+          chmod +x scripts/ci_headscale_e2e.sh scripts/lib/headscale_ci.sh
           ./scripts/ci_headscale_e2e.sh

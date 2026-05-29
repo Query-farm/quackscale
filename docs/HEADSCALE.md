@@ -80,7 +80,8 @@ Then run the smoke script (after `make release`):
 |----------|-------------------|
 | [libtailscale-integration.yml](../.github/workflows/libtailscale-integration.yml) | libtailscale `go test` (tstestcontrol) |
 | [headscale-integration.yml](../.github/workflows/headscale-integration.yml) | Headscale + `CALL tailscale_up` smoke |
-| [headscale-e2e.yml](../.github/workflows/headscale-e2e.yml) | Two-node QuackTail e2e (linux, `workflow_dispatch` only) |
+| [headscale-e2e.yml](../.github/workflows/headscale-e2e.yml) | Two-node QuackTail e2e (manual; uses [release](../.github/workflows/Release.yml) binary) |
+| [Release.yml](../.github/workflows/Release.yml) | Build linux `duckdb` + quackscale on **Release published** |
 
 ## Notes
 

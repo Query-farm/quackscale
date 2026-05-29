@@ -1,0 +1,65 @@
+# Build a Linux DuckDB binary with quackscale embedded and attach it to the GitHub release.
+# E2e workflows download this artifact instead of compiling from source.
+name: Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+env:
+  DUCKDB_VERSION: v1.5.3
+  RELEASE_ASSET: quacktail-linux-amd64
+
+jobs:
+  build-linux:
+    name: Build QuackTail linux amd64
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+          submodules: recursive
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.5'
+
+      - name: Pin DuckDB ${{ env.DUCKDB_VERSION }}
+        run: |
+          cd duckdb
+          git fetch --tags --depth 1 origin tag ${{ env.DUCKDB_VERSION }}
+          git checkout ${{ env.DUCKDB_VERSION }}
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build ccache
+
+      - name: Build DuckDB + quackscale
+        run: GEN=ninja make release
+
+      - name: Package release tarball
+        run: |
+          mkdir -p "dist/${RELEASE_ASSET}"
+          cp build/release/duckdb "dist/${RELEASE_ASSET}/"
+          mkdir -p "dist/${RELEASE_ASSET}/extension/quackscale"
+          cp build/release/extension/quackscale/quackscale.duckdb_extension \
+            "dist/${RELEASE_ASSET}/extension/quackscale/"
+          {
+            echo "tag=${{ github.event.release.tag_name }}"
+            echo "duckdb=${{ env.DUCKDB_VERSION }}"
+            echo "commit=${{ github.sha }}"
+          } > "dist/${RELEASE_ASSET}/VERSION"
+          tar -czf "dist/${RELEASE_ASSET}-${{ github.event.release.tag_name }}.tar.gz" -C dist "${RELEASE_ASSET}"
+          ls -lh dist/
+
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.release.tag_name }}
+          files: dist/*.tar.gz
