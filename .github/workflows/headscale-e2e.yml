@@ -59,15 +59,6 @@ jobs:
           echo "=== tailscale_status ==="
           "$DUCKDB" :memory: -batch -echo -c "CALL tailscale_status();"
 
-      - name: Install quack extension
-        run: |
-          echo "=== LOAD quack ==="
-          if ! "$DUCKDB" :memory: -batch -echo -c "LOAD quack; SELECT 'quack_loaded' AS status;"; then
-            echo "Installing quack from DuckDB core ..."
-            "$DUCKDB" :memory: -batch -echo -c "INSTALL quack FROM core; LOAD quack; SELECT 'quack_installed' AS status;" \
-              || "$DUCKDB" :memory: -batch -echo -c "INSTALL quack FROM core_nightly; LOAD quack; SELECT 'quack_installed_nightly' AS status;"
-          fi
-
       - name: DuckDB tailscale_up smoke
         run: |
           AUTHKEY="$(cat "$RUNNER_TEMP/headscale-authkey")"
@@ -94,16 +85,18 @@ jobs:
           HEADSCALE_AUTHKEY_FILE: ${{ runner.temp }}/headscale-authkey
           SKIP_HEADSCALE_VERIFY: "1"
           HEADSCALE_ALREADY_RUNNING: "1"
-          E2E_QUACK_BIND_HOST: "0.0.0.0"
-          E2E_QUACK_ATTACH_HOST: "127.0.0.1"
         run: |
-          chmod +x scripts/ci_headscale_e2e.sh scripts/lib/headscale_ci.sh scripts/lib/run_e2e_server.py
+          chmod +x scripts/ci_headscale_e2e.sh scripts/lib/headscale_ci.sh scripts/lib/quacktail_ci.sh scripts/e2e/quacktail-entrypoint.sh
           ./scripts/ci_headscale_e2e.sh
 
       - name: Stop Headscale
         if: always()
         run: |
           export HEADSCALE_CI_ROOT="$GITHUB_WORKSPACE"
+          export QUACKTAIL_CI_ROOT="$GITHUB_WORKSPACE"
+          # shellcheck source=scripts/lib/quacktail_ci.sh
+          source scripts/lib/quacktail_ci.sh
+          quacktail_ci_stop
           # shellcheck source=scripts/lib/headscale_ci.sh
           source scripts/lib/headscale_ci.sh
           headscale_ci_stop

@@ -1,133 +1,35 @@
 #!/usr/bin/env bash
-# Two-node QuackTail e2e over Headscale.
-# QuackTail (quackscale) is built into the release DuckDB — never LOAD quackscale.
+# Two-node QuackTail e2e over Headscale — server and client run in Docker on quacktail-ci.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DUCKDB="${DUCKDB:-$ROOT/build/release/duckdb}"
-HEADSCALE_CI_ROOT="$ROOT"
-# shellcheck source=scripts/lib/headscale_ci.sh
-source "$ROOT/scripts/lib/headscale_ci.sh"
+QUACKTAIL_CI_ROOT="$ROOT"
+# shellcheck source=scripts/lib/quacktail_ci.sh
+source "$ROOT/scripts/lib/quacktail_ci.sh"
 
 QUACK_TOKEN="${QUACK_TAILNET_TOKEN:-quackscale-e2e-shared-token}"
 SERVER_HOST="${E2E_SERVER_HOST:-quacktail-server}"
 CLIENT_HOST="${E2E_CLIENT_HOST:-quacktail-client}"
 QUACK_PORT="${E2E_QUACK_PORT:-9494}"
-# Bind all interfaces; client ATTACH uses quack:127.0.0.1 (avoids localhost IPv6-only listen).
-export E2E_QUACK_BIND_HOST="${E2E_QUACK_BIND_HOST:-0.0.0.0}"
-export E2E_QUACK_ATTACH_HOST="${E2E_QUACK_ATTACH_HOST:-127.0.0.1}"
-CLIENT_TIMEOUT="${E2E_CLIENT_TIMEOUT_SEC:-120}"
 
 WORK="${E2E_WORK:-${GITHUB_WORKSPACE:-$ROOT}/.e2e-work}"
-SERVER_DUCKDB_PID_FILE=""
 mkdir -p "$WORK"
 HS_DATA="$WORK/headscale-data"
 SERVER_STATE="$WORK/server-tailscale"
 CLIENT_STATE="$WORK/client-tailscale"
-SERVER_DB="$WORK/server.duckdb"
-SERVER_LOG="$WORK/server.log"
 CLIENT_LOG="$WORK/client.log"
 
-e2e_run_duckdb() {
-  local label="$1"
-  local db="$2"
-  local sql_file="$3"
-  local log_file="$4"
-
-  echo "=== $label ==="
-  echo "--- SQL: $(basename "$sql_file") ---"
-  cat "$sql_file"
-  echo "--- DuckDB output ---"
-  "$DUCKDB" "$db" -batch -echo -f "$sql_file" 2>&1 | tee -a "$log_file"
-  local rc=${PIPESTATUS[0]}
-  if (( rc != 0 )); then
-    echo "error: $label failed (duckdb exit $rc)" >&2
-    headscale_ci_logs
-    exit 1
+cleanup() {
+  quacktail_ci_stop
+  if [[ "${HEADSCALE_ALREADY_RUNNING:-}" != "1" ]]; then
+    headscale_ci_stop
   fi
-}
-
-e2e_server_duckdb_pid() {
-  if [[ -n "${SERVER_DUCKDB_PID_FILE:-}" && -f "$SERVER_DUCKDB_PID_FILE" ]]; then
-    cat "$SERVER_DUCKDB_PID_FILE"
-    return 0
-  fi
-  return 1
-}
-
-e2e_assert_server_alive() {
-  local label="${1:-before client}"
-  local duckdb_pid=""
-  if ! duckdb_pid="$(e2e_server_duckdb_pid)"; then
-    echo "error: server DuckDB pid file missing ($label)" >&2
-    tail -80 "$SERVER_LOG" >&2 || true
-    return 1
-  fi
-  if ! kill -0 "$duckdb_pid" 2>/dev/null; then
-    echo "error: server DuckDB (pid $duckdb_pid) is not running ($label)" >&2
-    tail -80 "$SERVER_LOG" >&2 || true
-    return 1
-  fi
-  if ! headscale_ci_quack_port_open "$QUACK_PORT"; then
-    echo "error: Quack not reachable on port ${QUACK_PORT} ($label)" >&2
-    return 1
-  fi
-  return 0
-}
-
-e2e_wait_for_quack_server() {
-  local attempt=0
-  echo "Waiting for Quack on port ${QUACK_PORT} (bind ${E2E_QUACK_BIND_HOST}; server DuckDB must stay alive) ..."
-  while (( attempt < 60 )); do
-    attempt=$((attempt + 1))
-    if ! e2e_server_duckdb_pid >/dev/null 2>&1 || ! kill -0 "$(e2e_server_duckdb_pid)" 2>/dev/null; then
-      echo "error: server DuckDB exited before Quack was ready" >&2
-      tail -80 "$SERVER_LOG" >&2 || true
-      headscale_ci_logs
-      exit 1
-    fi
-    if grep -q "Failed to bind DuckDB Quack RPC server" "$SERVER_LOG" 2>/dev/null; then
-      echo "error: quack_serve failed to bind" >&2
-      tail -80 "$SERVER_LOG" >&2 || true
-      headscale_ci_logs
-      exit 1
-    fi
-    if grep -q "listen_url" "$SERVER_LOG" 2>/dev/null && headscale_ci_quack_port_open "$QUACK_PORT"; then
-      echo "Quack is ready on port ${QUACK_PORT} (server pid $(e2e_server_duckdb_pid))"
-      return 0
-    fi
-    if (( attempt % 5 == 0 )); then
-      echo "  attempt ${attempt} (server duckdb pid $(e2e_server_duckdb_pid 2>/dev/null || echo '?')) ..."
-      tail -5 "$SERVER_LOG" 2>/dev/null || true
-      ss -ltnp 2>/dev/null | grep ":${QUACK_PORT}" || true
-    fi
-    sleep 2
-  done
-  echo "error: Quack not reachable on port ${QUACK_PORT}" >&2
-  ss -ltnp 2>/dev/null | grep ":${QUACK_PORT}" || echo "(no listener on :${QUACK_PORT})"
-  tail -80 "$SERVER_LOG" >&2 || true
-  headscale_ci_logs
-  exit 1
 }
 
 e2e_dump_logs() {
-  if [[ -z "${WORK:-}" ]]; then
-    return 0
-  fi
-  echo "::group::E2e server log"
-  if [[ -f "${SERVER_LOG:-}" ]]; then
-    cat "$SERVER_LOG"
-  else
-    echo "(no server log)"
-  fi
-  echo "::endgroup::"
-  echo "::group::E2e client log"
-  if [[ -f "${CLIENT_LOG:-}" ]]; then
-    cat "$CLIENT_LOG" || true
-  else
-    echo "(no client log)"
-  fi
-  echo "::endgroup::"
+  quacktail_ci_logs
+  quacktail_ci_client_logs
   if [[ -d "$WORK" ]]; then
     echo "::group::E2e work directory ($WORK)"
     ls -la "$WORK" || true
@@ -140,18 +42,6 @@ e2e_dump_logs() {
   fi
 }
 
-cleanup() {
-  if [[ -n "${SERVER_WRAPPER_PID:-}" ]]; then
-    kill "$SERVER_WRAPPER_PID" >/dev/null 2>&1 || true
-    wait "$SERVER_WRAPPER_PID" >/dev/null 2>&1 || true
-  elif [[ -n "${SERVER_PID:-}" ]]; then
-    kill "$SERVER_PID" >/dev/null 2>&1 || true
-    wait "$SERVER_PID" >/dev/null 2>&1 || true
-  fi
-  if [[ "${HEADSCALE_ALREADY_RUNNING:-}" != "1" ]]; then
-    headscale_ci_stop
-  fi
-}
 trap 'e2e_dump_logs; cleanup' EXIT
 
 if [[ ! -x "$DUCKDB" ]]; then
@@ -161,16 +51,9 @@ fi
 
 echo "Using DuckDB: $DUCKDB"
 echo "E2e work directory: $WORK"
-echo "E2e Quack config: bind=${E2E_QUACK_BIND_HOST} attach=${E2E_QUACK_ATTACH_HOST} port=${QUACK_PORT}"
-: >"$SERVER_LOG"
-: >"$CLIENT_LOG"
+echo "E2e mode: Docker containers on network ${HEADSCALE_DOCKER_NETWORK}"
 
-echo "=== ensure quack extension ==="
-if ! "$DUCKDB" -c "LOAD quack; SELECT 1;" 2>&1 | tee -a "$SERVER_LOG"; then
-  echo "Installing quack from DuckDB core ..."
-  "$DUCKDB" -c "INSTALL quack FROM core; LOAD quack; SELECT 1;" 2>&1 | tee -a "$SERVER_LOG" \
-    || "$DUCKDB" -c "INSTALL quack FROM core_nightly; LOAD quack; SELECT 1;" 2>&1 | tee -a "$SERVER_LOG"
-fi
+quacktail_ci_build_image "$ROOT"
 
 mkdir -p "$HS_DATA" "$SERVER_STATE" "$CLIENT_STATE"
 if [[ "${HEADSCALE_ALREADY_RUNNING:-}" == "1" ]]; then
@@ -194,60 +77,44 @@ else
 fi
 export QUACK_TAILNET_TOKEN="$QUACK_TOKEN"
 
-# One long-lived server process: tailscale_up → seed data → quack_serve (blocking on 0.0.0.0).
+# Paths inside the container (/work is bind-mounted from $WORK).
+CONTAINER_SERVER_STATE="/work/server-tailscale"
+CONTAINER_CLIENT_STATE="/work/client-tailscale"
+
 {
-  headscale_ci_sql_tailscale_up "$SERVER_HOST" "$SERVER_STATE" "$AUTHKEY"
+  headscale_ci_sql_tailscale_up "$SERVER_HOST" "$CONTAINER_SERVER_STATE" "$AUTHKEY"
   cat <<SQL
 
 CREATE TABLE IF NOT EXISTS e2e_payload (id INTEGER PRIMARY KEY, msg VARCHAR, source VARCHAR);
 DELETE FROM e2e_payload;
 INSERT INTO e2e_payload VALUES (1, 'seed-from-server', 'server');
-
-LOAD quack;
-
 SQL
-  headscale_ci_sql_quack_serve "$QUACK_PORT"
-} >"$WORK/server_serve.sql"
+} >"$WORK/server_setup.sql"
 
-SERVER_QUACK_URI="$(headscale_ci_e2e_quack_attach_uri "0.0.0.0" "$QUACK_PORT")"
-SERVER_QUACK_SCOPE="$(headscale_ci_e2e_quack_secret_scope "0.0.0.0" "$QUACK_PORT")"
-echo "Client Quack ATTACH URI: ${SERVER_QUACK_URI} (SCOPE ${SERVER_QUACK_SCOPE})"
-echo "Server Quack bind: ${E2E_QUACK_BIND_HOST} (ATTACH via ${E2E_QUACK_ATTACH_HOST}; see https://duckdb.org/docs/current/quack/overview)"
+echo "=== Starting QuackTail server container ($SERVER_HOST) ==="
+echo "--- SQL: server_setup.sql ---"
+cat "$WORK/server_setup.sql"
+quacktail_ci_start_server "$DUCKDB" "$WORK" "$SERVER_HOST" "$QUACK_PORT"
+quacktail_ci_wait_server "$QUACK_PORT"
 
-echo "=== Starting Quack listener on server ==="
-echo "--- SQL: server_serve.sql ---"
-cat "$WORK/server_serve.sql"
-SERVER_DUCKDB_PID_FILE="$SERVER_LOG.duckdb.pid"
-echo "--- DuckDB server output (streamed; session kept open for Quack) ---"
-python3 "$ROOT/scripts/lib/run_e2e_server.py" "$DUCKDB" "$SERVER_DB" "$WORK/server_serve.sql" "$SERVER_LOG" &
-SERVER_WRAPPER_PID=$!
+echo "Resolving server tailnet IP from Headscale ..."
+SERVER_IP="$(headscale_ci_node_ipv4 "$SERVER_HOST" 60)"
+echo "Server tailnet IP: ${SERVER_IP}"
+echo "Server MagicDNS: $(headscale_ci_tailnet_fqdn "$SERVER_HOST")"
 
-sleep 2
-e2e_wait_for_quack_server
-
-echo "Resolving server tailnet IP from Headscale (after server joined) ..."
-SERVER_IP=""
-if SERVER_IP="$(headscale_ci_node_ipv4 "$SERVER_HOST" 30)"; then
-  echo "Server tailnet IP: ${SERVER_IP}"
-  echo "Server MagicDNS name: $(headscale_ci_tailnet_fqdn "$SERVER_HOST")"
-  echo "Tailnet ATTACH (needs tailscale_listen bridge): $(headscale_ci_quack_uri_for_ip "$SERVER_IP" "$QUACK_PORT")"
-else
-  echo "warn: server tailnet IP not resolved (localhost ATTACH unaffected)" >&2
-fi
-
-echo "Client will ATTACH: ${SERVER_QUACK_URI}"
-e2e_assert_server_alive "before client" || exit 1
+SERVER_QUACK_URI="$(headscale_ci_quack_uri_for_ip "$SERVER_IP" "$QUACK_PORT")"
+SERVER_QUACK_SCOPE="$SERVER_QUACK_URI"
+echo "Client will ATTACH: ${SERVER_QUACK_URI} (SCOPE ${SERVER_QUACK_SCOPE})"
 
 {
   cat <<SQL
 LOAD quack;
 
 SQL
-  headscale_ci_sql_tailscale_up "$CLIENT_HOST" "$CLIENT_STATE" "$AUTHKEY"
+  headscale_ci_sql_tailscale_up "$CLIENT_HOST" "$CONTAINER_CLIENT_STATE" "$AUTHKEY"
   headscale_ci_sql_quack_client_attach "$SERVER_QUACK_URI" "$QUACK_TOKEN" "$SERVER_QUACK_SCOPE"
   cat <<SQL
 
--- Local quack_discover() lists this node's tailnet endpoints (proves tailscale_up on client).
 CREATE TEMP TABLE _discover AS SELECT * FROM quack_discover();
 SELECT 'discover_count|' || COUNT(*)::VARCHAR;
 
@@ -259,23 +126,16 @@ SELECT 'server_msg|' || msg FROM remote.e2e_payload WHERE source = 'server';
 SQL
 } >"$WORK/client.sql"
 
-echo "=== Running QuackTail client ($CLIENT_HOST) ==="
-echo "--- SQL: client.sql ---"
-cat "$WORK/client.sql"
-echo "--- DuckDB output ---"
-: >"$CLIENT_LOG"
+echo "=== Running QuackTail client container ($CLIENT_HOST) ==="
 set +e
-timeout "$CLIENT_TIMEOUT" "$DUCKDB" :memory: -batch -echo -f "$WORK/client.sql" 2>&1 | tee -a "$CLIENT_LOG"
+quacktail_ci_run_client "$DUCKDB" "$WORK" "$QUACK_PORT" 2>&1 | tee "$CLIENT_LOG"
 CLIENT_RC=${PIPESTATUS[0]}
 set -e
-if (( CLIENT_RC == 124 )); then
-  echo "error: client DuckDB timed out after ${CLIENT_TIMEOUT}s (likely ATTACH cannot reach quack_serve)" >&2
-  CLIENT_RC=124
-fi
+
 CLIENT_OUT="$(cat "$CLIENT_LOG")"
 if (( CLIENT_RC != 0 )); then
-  echo "error: client DuckDB failed (exit $CLIENT_RC)" >&2
-  tail -100 "$CLIENT_LOG" >&2 || true
+  echo "error: client container failed (exit $CLIENT_RC)" >&2
+  quacktail_ci_client_logs
   headscale_ci_logs
   exit 1
 fi
@@ -283,14 +143,12 @@ fi
 echo "=== Result rows ==="
 echo "$CLIENT_OUT" | grep -E 'discover_count|row_count|client_msg|server_msg|insert-from-client|seed-from-server' || true
 
-if echo "$CLIENT_OUT" | grep -qE 'discover_count\|(1|2)'; then
-  echo "ok: client on tailnet (quack_discover returned endpoints)"
-else
+echo "$CLIENT_OUT" | grep -qE 'discover_count\|(1|2)' || {
   echo "error: client quack_discover failed (expected discover_count|1 or |2)" >&2
-  echo "full client output:" >&2
   echo "$CLIENT_OUT" >&2
   exit 1
-fi
+}
+echo "ok: client on tailnet (quack_discover returned endpoints)"
 
 echo "$CLIENT_OUT" | grep -q 'insert-from-client' || {
   echo "error: client INSERT row not found" >&2

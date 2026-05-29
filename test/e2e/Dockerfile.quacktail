@@ -1,0 +1,15 @@
+# Minimal CI image for QuackTail e2e. DuckDB binary is bind-mounted at runtime.
+FROM ubuntu:24.04
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl tini \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY scripts/e2e/quacktail-entrypoint.sh /usr/local/bin/quacktail-entrypoint.sh
+RUN chmod +x /usr/local/bin/quacktail-entrypoint.sh
+
+ENV DUCKDB_BIN=/usr/local/bin/duckdb
+ENV QUACK_PORT=9494
+
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/quacktail-entrypoint.sh"]
+CMD ["server"]
