@@ -129,10 +129,10 @@ services:
       HEADSCALE_CONFIG: /etc/headscale/config.yaml
     healthcheck:
       test: [CMD, /usr/local/bin/quacktail-server-healthcheck.sh]
-      interval: 5s
-      timeout: 5s
-      retries: 24
-      start_period: 60s
+      interval: 3s
+      timeout: 3s
+      retries: 40
+      start_period: 15s
     networks:
       quacktail:
         aliases: [quacktail-server]

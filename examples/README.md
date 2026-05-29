@@ -12,11 +12,12 @@ The image pulls the **latest** [GitHub release](https://github.com/quackscience/
 
 ```bash
 git pull && cd examples
-docker compose down --remove-orphans -v
 docker compose build quacktail-server quacktail-client
-docker compose up -d headscale quacktail-server
+docker compose up -d --force-recreate headscale quacktail-server
 docker compose --profile test run --rm quacktail-client
 ```
+
+Use `--force-recreate` on the server after script/SQL changes (otherwise the old DuckDB process keeps running without the new `quack:0.0.0.0` bind).
 
 Expect `✓ Demo passed — two-node QuackTail cluster is working`.
 
@@ -138,14 +139,14 @@ docker compose --profile test down --remove-orphans -v
 
 **Server restart loop** — check `docker compose logs quacktail-server`; for libtailscale detail: `docker compose exec quacktail-server tail -50 /work/server.log`
 
-**Client times out after `CREATE SECRET Success`** — server likely still using old `quack_uri()` bind (not listenable). Restart server so it picks up `quack:0.0.0.0:9494`:
+**Client times out after `CREATE SECRET Success`** — server Quack not reachable. Recreate the server so it picks up `quack:0.0.0.0:9494` and writes `/work/quack_ready`:
 
 ```bash
-docker compose restart quacktail-server
-# wait until healthcheck passes, then re-run client
+docker compose up -d --force-recreate quacktail-server
+docker compose logs quacktail-server   # should show quack:0.0.0.0 bind, not quack_uri()
 docker compose --profile test run --rm quacktail-client
 ```
 
-Or reset volumes: `docker compose down --remove-orphans -v`
+If the server exits during init, inspect `/work/server.log` inside the container.
 
 **`Multiple streaming scans or streaming scans + CTAS / insert`** — this is a **`quack` extension** planner limit, not QuackScale. It fires when one SQL statement both reads and writes the same attached Quack catalog (e.g. `INSERT … WHERE NOT EXISTS (SELECT … FROM remote.t)`). See [docs/QUACK_STREAMING.md](../docs/QUACK_STREAMING.md).

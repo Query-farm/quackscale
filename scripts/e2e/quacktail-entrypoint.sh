@@ -107,20 +107,17 @@ run_server() {
     COMPOSE_REFRESH_SERVER_QUACK=1 QUACKTAIL_AUTO_BOOTSTRAP=1 /usr/local/bin/quacktail-compose-bootstrap.sh
   fi
   ensure_quack
+  rm -f "${WORK}/quack_ready"
   cat "${WORK}/server_setup.sql" "${WORK}/server_quack.sql" >"$INIT_SQL"
   if [[ "$QUIET" == "1" ]]; then
-    echo "→ quacktail-server: join tailnet + quack_serve on quack:${SERVER_HOST}:${PORT}"
+    echo "→ quacktail-server: join tailnet + quack_serve on quack:0.0.0.0:${PORT}"
     echo "  (libtailscale logs → ${WORK}/server.log)"
   else
     echo "=== server init SQL ==="
     cat "$INIT_SQL"
   fi
-  export DUCKDB DB WORK INIT_SQL DUCKDB_EXTENSION_DIRECTORY QUIET
-  if [[ "$QUIET" == "1" ]]; then
-    exec bash -c 'sleep infinity | stdbuf -oL -eL "$DUCKDB" -cmd "SET extension_directory='"'"'${DUCKDB_EXTENSION_DIRECTORY}'"'"';" "$DB" -init "$INIT_SQL" 2>>"${WORK}/server.log"'
-  else
-    exec bash -c 'sleep infinity | stdbuf -oL -eL "$DUCKDB" -cmd "SET extension_directory='"'"'${DUCKDB_EXTENSION_DIRECTORY}'"'"';" "$DB" -init "$INIT_SQL"'
-  fi
+  export DUCKDB DB WORK INIT_SQL DUCKDB_EXTENSION_DIRECTORY QUIET PORT QUACK_TAILNET_TOKEN
+  exec /usr/local/bin/quacktail-server-run.sh
 }
 
 quacktail_filter_demo_stream() {
