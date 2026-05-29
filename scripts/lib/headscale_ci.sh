@@ -375,3 +375,21 @@ PY
   echo "error: $host:$port not reachable" >&2
   return 1
 }
+
+# Emit CALL tailscale_up(...) for DuckDB (hostname and other args are named parameters).
+headscale_ci_sql_tailscale_up() {
+  local hostname="$1"
+  local state_dir="$2"
+  local authkey="$3"
+  local control_url="${4:-$HEADSCALE_CONTROL_URL}"
+
+  cat <<SQL
+CALL tailscale_up(
+    hostname => '${hostname}',
+    control_url => '${control_url}',
+    authkey => '${authkey}',
+    state_dir => '${state_dir}',
+    ephemeral => true
+);
+SQL
+}
