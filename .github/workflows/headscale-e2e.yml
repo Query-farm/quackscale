@@ -1,6 +1,4 @@
 # Two-node QuackTail e2e over Headscale. Manual only — uses pre-built release binaries.
-# Headscale runs as a GitHub Actions service container (localhost:8080).
-# https://docs.github.com/en/actions/tutorials/use-containerized-services/create-redis-service-containers
 name: Headscale QuackTail e2e
 
 on:
@@ -13,70 +11,34 @@ on:
         type: string
 
 env:
-  HEADSCALE_CI_IMAGE: ghcr.io/${{ github.repository }}/headscale-ci:0.28.0
-  HEADSCALE_USE_GHA_SERVICE: "1"
   HEADSCALE_CONTROL_URL: http://127.0.0.1:8080
 
 jobs:
-  build-headscale-ci:
-    name: Build Headscale CI image
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - uses: docker/build-push-action@v6
-        with:
-          context: test/headscale
-          file: test/headscale/Dockerfile.ci
-          push: true
-          tags: |
-            ghcr.io/${{ github.repository }}/headscale-ci:0.28.0
-            ghcr.io/${{ github.repository }}/headscale-ci:${{ github.sha }}
-
   quacktail-e2e:
     name: Headscale QuackTail e2e (linux)
-    needs: build-headscale-ci
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
       contents: read
-      packages: read
-
-    services:
-      headscale:
-        image: ghcr.io/${{ github.repository }}/headscale-ci:0.28.0
-        credentials:
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-        ports:
-          - 8080:8080
-        options: >-
-          --health-cmd "headscale health"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 12
-          --health-start-period 10s
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Verify Headscale service
+      - name: Start Headscale
         run: |
-          echo "HEADSCALE_CONTROL_URL=$HEADSCALE_CONTROL_URL"
-          curl -v "$HEADSCALE_CONTROL_URL/health"
           chmod +x scripts/lib/headscale_ci.sh
+          export HEADSCALE_CI_ROOT="$GITHUB_WORKSPACE"
+          export HEADSCALE_DATA_DIR="$RUNNER_TEMP/headscale-data"
           # shellcheck source=scripts/lib/headscale_ci.sh
           source scripts/lib/headscale_ci.sh
-          headscale_ci_wait_ready
+          headscale_ci_start "$HEADSCALE_DATA_DIR"
+
+      - name: Verify Headscale
+        run: |
+          export HEADSCALE_CI_ROOT="$GITHUB_WORKSPACE"
+          # shellcheck source=scripts/lib/headscale_ci.sh
+          source scripts/lib/headscale_ci.sh
+          curl -v "$HEADSCALE_CONTROL_URL/health"
           AUTHKEY="$(headscale_ci_create_authkey)"
           echo "authkey_len=${#AUTHKEY}"
           headscale_ci_verify_tailscale_client "$AUTHKEY" "gha-headscale-smoke"
@@ -125,9 +87,18 @@ jobs:
         env:
           HEADSCALE_AUTHKEY_FILE: ${{ runner.temp }}/headscale-authkey
           SKIP_HEADSCALE_VERIFY: "1"
+          HEADSCALE_ALREADY_RUNNING: "1"
         run: |
           chmod +x scripts/ci_headscale_e2e.sh scripts/lib/headscale_ci.sh scripts/lib/run_e2e_server.py
           ./scripts/ci_headscale_e2e.sh
+
+      - name: Stop Headscale
+        if: always()
+        run: |
+          export HEADSCALE_CI_ROOT="$GITHUB_WORKSPACE"
+          # shellcheck source=scripts/lib/headscale_ci.sh
+          source scripts/lib/headscale_ci.sh
+          headscale_ci_stop
 
       - name: Upload e2e logs on failure
         if: failure()

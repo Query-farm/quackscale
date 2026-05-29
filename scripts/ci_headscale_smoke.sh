@@ -11,7 +11,9 @@ source "$ROOT/scripts/lib/headscale_ci.sh"
 STATE_DIR="$(mktemp -d)"
 
 cleanup() {
-  headscale_ci_stop
+  if [[ "${HEADSCALE_ALREADY_RUNNING:-}" != "1" ]]; then
+    headscale_ci_stop
+  fi
   rm -rf "$STATE_DIR"
 }
 trap cleanup EXIT
@@ -21,7 +23,12 @@ if [[ ! -x "$DUCKDB" ]]; then
   exit 1
 fi
 
-headscale_ci_start
+if [[ "${HEADSCALE_ALREADY_RUNNING:-}" == "1" ]]; then
+  headscale_ci_wait_ready
+else
+  DATA_DIR="$(mktemp -d)"
+  headscale_ci_start "$DATA_DIR"
+fi
 AUTHKEY="$(headscale_ci_create_authkey)"
 headscale_ci_verify_tailscale_client "$AUTHKEY" "quackscale-smoke"
 

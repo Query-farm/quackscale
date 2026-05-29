@@ -47,7 +47,9 @@ cleanup() {
     kill "$SERVER_PID" >/dev/null 2>&1 || true
     wait "$SERVER_PID" >/dev/null 2>&1 || true
   fi
-  headscale_ci_stop
+  if [[ "${HEADSCALE_ALREADY_RUNNING:-}" != "1" ]]; then
+    headscale_ci_stop
+  fi
 }
 trap cleanup EXIT
 
@@ -69,7 +71,11 @@ if ! "$DUCKDB" -c "LOAD quack; SELECT 1;" 2>&1 | tee -a "$SERVER_LOG"; then
 fi
 
 mkdir -p "$HS_DATA" "$SERVER_STATE" "$CLIENT_STATE"
-headscale_ci_start
+if [[ "${HEADSCALE_ALREADY_RUNNING:-}" == "1" ]]; then
+  headscale_ci_wait_ready
+else
+  headscale_ci_start "$HS_DATA"
+fi
 
 if [[ -n "${HEADSCALE_AUTHKEY_FILE:-}" && -f "$HEADSCALE_AUTHKEY_FILE" ]]; then
   AUTHKEY="$(cat "$HEADSCALE_AUTHKEY_FILE")"

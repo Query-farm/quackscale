@@ -57,30 +57,17 @@ CALL quack_serve(quack_uri(), allow_other_hostname => true, token => quack_token
 
 ## Docker (lab / CI)
 
-Headscale config is baked into `test/headscale/Dockerfile.ci` (required for [GitHub Actions service containers](https://docs.github.com/en/actions/tutorials/use-containerized-services/create-redis-service-containers), which start before checkout).
-
-**Local:**
+Uses the [official Headscale container](https://headscale.net/stable/setup/install/container/) (`docker.io/headscale/headscale:0.28.0`) with config from [`test/headscale/`](../test/headscale/). CI starts the container **after checkout** so config files can be bind-mounted.
 
 ```sh
 export HEADSCALE_CI_ROOT=$PWD
 source scripts/lib/headscale_ci.sh
-headscale_ci_start_local
+headscale_ci_start /tmp/headscale-data
+./scripts/ci_headscale_smoke.sh   # after make release
+headscale_ci_stop
 ```
 
-**GitHub Actions** (`headscale-e2e.yml`): a `build-headscale-ci` job pushes the image to `ghcr.io`, then the e2e job declares:
-
-```yaml
-services:
-  headscale:
-    image: ghcr.io/<repo>/headscale-ci:0.28.0
-    ports:
-      - 8080:8080
-    options: >-
-      --health-cmd "headscale health"
-      ...
-```
-
-The runner talks to Headscale at `http://127.0.0.1:8080` (same pattern as Redis on `localhost:6379`).
+Required flags (from upstream docs): `--read-only`, `--tmpfs /var/run/headscale`, config volume, data volume.
 
 ## CI in this repository
 

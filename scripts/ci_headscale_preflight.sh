@@ -22,7 +22,7 @@ if ! "$DUCKDB" -c "LOAD quack; SELECT 1;"; then
     || "$DUCKDB" -c "INSTALL quack FROM core_nightly; LOAD quack; SELECT 1;"
 fi
 
-headscale_ci_start
+headscale_ci_start "$WORK/headscale-data"
 AUTHKEY="$(headscale_ci_create_authkey)"
 headscale_ci_verify_tailscale_client "$AUTHKEY" "headscale-preflight-smoke"
 

@@ -1,13 +1,9 @@
 #!/usr/bin/env bash
-# Headscale helpers for CI.
-#
-# GitHub Actions: set HEADSCALE_USE_GHA_SERVICE=1 and declare Headscale as a
-# workflow service container (localhost:8080). See headscale-e2e.yml.
-# Local dev: leave unset — scripts start test/headscale/Dockerfile.ci via docker.
+# Headscale helpers for CI (official container image).
+# https://headscale.net/stable/setup/install/container/
 set -euo pipefail
 
-HEADSCALE_IMAGE="${HEADSCALE_IMAGE:-headscale/headscale:0.28.0}"
-HEADSCALE_CI_IMAGE="${HEADSCALE_CI_IMAGE:-headscale-ci:local}"
+HEADSCALE_IMAGE="${HEADSCALE_IMAGE:-docker.io/headscale/headscale:0.28.0}"
 HEADSCALE_CONTAINER="${HEADSCALE_CONTAINER:-quackscale-headscale-ci}"
 HEADSCALE_CONTROL_URL="${HEADSCALE_CONTROL_URL:-http://127.0.0.1:8080}"
 HEADSCALE_CI_USER="${HEADSCALE_CI_USER:-quackscale-ci}"
@@ -26,26 +22,14 @@ headscale_ci_container_id() {
     echo "$HEADSCALE_CONTAINER_ID"
     return 0
   fi
-  local id=""
-  id="$(docker ps -q --filter "name=${HEADSCALE_CONTAINER}" | head -1 || true)"
-  if [[ -z "$id" && -n "${HEADSCALE_CI_IMAGE:-}" ]]; then
-    id="$(docker ps -q --filter "ancestor=${HEADSCALE_CI_IMAGE}" | head -1 || true)"
-  fi
-  if [[ -z "$id" ]]; then
-    id="$(docker ps -q --filter "publish=8080" | head -1 || true)"
-  fi
-  if [[ -n "$id" ]]; then
-    echo "$id"
-    return 0
-  fi
-  return 1
+  docker ps -q --filter "name=^/${HEADSCALE_CONTAINER}$" | head -1
 }
 
 headscale_ci_exec() {
   headscale_ci_require_docker
   local id
   id="$(headscale_ci_container_id)" || {
-    echo "error: Headscale container not found" >&2
+    echo "error: Headscale container '$HEADSCALE_CONTAINER' not found" >&2
     docker ps -a >&2 || true
     return 1
   }
@@ -54,8 +38,8 @@ headscale_ci_exec() {
 
 headscale_ci_logs() {
   echo "::group::Headscale container logs"
-  if id="$(headscale_ci_container_id 2>/dev/null)"; then
-    docker logs "$id" 2>&1 | tail -100 || true
+  if docker ps -a --filter "name=^/${HEADSCALE_CONTAINER}$" --format '{{.Names}}' | grep -qx "$HEADSCALE_CONTAINER"; then
+    docker logs "$HEADSCALE_CONTAINER" 2>&1 | tail -100 || true
   else
     docker ps -a >&2 || true
   fi
@@ -72,6 +56,10 @@ headscale_ci_wait_ready() {
       echo "Headscale is ready."
       return 0
     fi
+    if (( attempt % 5 == 0 )); then
+      echo "  attempt $attempt — container health:"
+      docker inspect --format='{{.State.Health.Status}}' "$HEADSCALE_CONTAINER" 2>/dev/null || true
+    fi
     sleep 2
   done
   echo "error: Headscale did not become healthy" >&2
@@ -79,35 +67,34 @@ headscale_ci_wait_ready() {
   return 1
 }
 
-headscale_ci_start_local() {
+headscale_ci_start() {
   headscale_ci_require_docker
-  echo "Building local Headscale CI image ..."
-  docker build -t "$HEADSCALE_CI_IMAGE" -f "$HEADSCALE_CONFIG_DIR/Dockerfile.ci" "$HEADSCALE_CONFIG_DIR"
+  local data_dir="${1:?data dir required}"
+  mkdir -p "$data_dir"
+
   docker rm -f "$HEADSCALE_CONTAINER" >/dev/null 2>&1 || true
-  echo "Starting Headscale container ..."
+  echo "Starting Headscale ($HEADSCALE_IMAGE) ..."
+  docker pull -q "$HEADSCALE_IMAGE" >/dev/null
+
   docker run -d --name "$HEADSCALE_CONTAINER" \
+    --read-only \
+    --tmpfs /var/run/headscale \
+    -v "$HEADSCALE_CONFIG_DIR/config-ci.yaml:/etc/headscale/config.yaml:ro" \
+    -v "$HEADSCALE_CONFIG_DIR/policy.hujson:/etc/headscale/policy.hujson:ro" \
+    -v "$data_dir:/var/lib/headscale" \
     -p 127.0.0.1:8080:8080 \
     --health-cmd "headscale health" \
-    --health-interval 2s \
+    --health-interval 5s \
     --health-timeout 5s \
-    --health-retries 15 \
-    --health-start-period 5s \
-    "$HEADSCALE_CI_IMAGE" serve >/dev/null
+    --health-retries 12 \
+    --health-start-period 10s \
+    "$HEADSCALE_IMAGE" \
+    serve
+
   headscale_ci_wait_ready
 }
 
-headscale_ci_start() {
-  if [[ "${HEADSCALE_USE_GHA_SERVICE:-}" == "1" ]]; then
-    headscale_ci_wait_ready
-  else
-    headscale_ci_start_local
-  fi
-}
-
 headscale_ci_stop() {
-  if [[ "${HEADSCALE_USE_GHA_SERVICE:-}" == "1" ]]; then
-    return 0
-  fi
   docker rm -f "$HEADSCALE_CONTAINER" >/dev/null 2>&1 || true
 }
 
