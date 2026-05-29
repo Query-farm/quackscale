@@ -9,30 +9,37 @@ QUACK_PORT="${QUACK_PORT:-9494}"
 QUACK_TOKEN="${QUACK_TAILNET_TOKEN:-quackscale-demo-token}"
 CONTROL_URL="${HEADSCALE_CONTROL_URL:-http://headscale:8080}"
 HS_USER="${HEADSCALE_USER:-quackscale-demo}"
+HS_CFG="${HEADSCALE_CONFIG:-/etc/headscale/config.yaml}"
+HS=(headscale -c "$HS_CFG")
+HS_SOCKET="${HEADSCALE_SOCKET:-/var/run/headscale/headscale.sock}"
 
 if ! command -v headscale >/dev/null 2>&1; then
   echo "error: headscale CLI not found (required for QUACKTAIL_AUTO_BOOTSTRAP)" >&2
   exit 1
 fi
 
-HS_CFG="${HEADSCALE_CONFIG:-/etc/headscale/config.yaml}"
-HS=(headscale -c "$HS_CFG")
-
 mkdir -p "$WORK"
 
-if ! "${HS[@]}" users create "$HS_USER" >/dev/null 2>&1; then
-  echo "note: headscale user '$HS_USER' may already exist" >&2
+echo "Waiting for Headscale socket ${HS_SOCKET} ..."
+for _ in $(seq 1 60); do
+  if [[ -S "$HS_SOCKET" ]]; then
+    break
+  fi
+  sleep 1
+done
+if [[ ! -S "$HS_SOCKET" ]]; then
+  echo "error: Headscale socket not found at ${HS_SOCKET}" >&2
+  exit 1
 fi
 
-USER_ID="$(
-  HS_USER="$HS_USER" "${HS[@]}" users list -o json | HS_USER="$HS_USER" python3 - <<'PY'
-import json, os, sys
+"${HS[@]}" users create "$HS_USER" >/dev/null 2>&1 || true
 
-def field(obj, *names):
-    for name in names:
-        if isinstance(obj, dict) and obj.get(name) is not None:
-            return obj[name]
-    return None
+USER_ID=""
+users_json="$("${HS[@]}" users list -o json 2>/dev/null || true)"
+if [[ -n "$users_json" ]]; then
+  USER_ID="$(
+    HS_USER="$HS_USER" USERS_JSON="$users_json" python3 - <<'PY'
+import json, os, sys
 
 def as_list(value):
     if isinstance(value, list):
@@ -43,16 +50,31 @@ def as_list(value):
                 return value[key]
     return []
 
+def field(obj, *names):
+    for name in names:
+        if isinstance(obj, dict) and obj.get(name) is not None:
+            return obj[name]
+    return None
+
 target = os.environ["HS_USER"]
-for user in as_list(json.load(sys.stdin)):
-    if field(user, "name", "Name") == target:
+try:
+    users = as_list(json.loads(os.environ["USERS_JSON"]))
+except json.JSONDecodeError:
+    sys.exit(0)
+for user in users:
+    if field(user, "name", "Name", "username", "Username") == target:
         uid = field(user, "id", "Id", "ID")
         if uid is not None:
             print(uid)
         sys.exit(0)
+if users:
+    uid = field(users[0], "id", "Id", "ID")
+    if uid is not None:
+        print(uid)
 sys.exit(0)
 PY
-)" || true
+  )" || true
+fi
 
 create_authkey() {
   local -a cmd=(preauthkeys create --reusable --expiration 168h)
@@ -62,10 +84,12 @@ create_authkey() {
   "${HS[@]}" "${cmd[@]}"
 }
 
-AUTHKEY="$(create_authkey 2>/dev/null | awk 'NF {k=$0} END {print k}')"
-if [[ -z "$AUTHKEY" ]]; then
-  AUTHKEY="$(create_authkey -o json 2>/dev/null | python3 - <<'PY'
-import json, sys
+AUTHKEY=""
+authkey_json="$(create_authkey -o json 2>/dev/null || true)"
+if [[ -n "$authkey_json" ]]; then
+  AUTHKEY="$(
+    AUTHKEY_JSON="$authkey_json" python3 - <<'PY'
+import json, os, sys
 
 def field(obj, *names):
     for name in names:
@@ -73,13 +97,13 @@ def field(obj, *names):
             return obj[name]
     return None
 
-raw = sys.stdin.read().strip()
-if not raw:
+try:
+    data = json.loads(os.environ["AUTHKEY_JSON"])
+except json.JSONDecodeError:
     sys.exit(1)
-data = json.loads(raw)
 key = field(data, "key", "Key")
 if not key and isinstance(data, dict):
-    nested = field(data, "preAuthKey", "pre_auth_key")
+    nested = field(data, "preAuthKey", "pre_auth_key", "PreAuthKey")
     if isinstance(nested, dict):
         key = field(nested, "key", "Key")
 print(key or "")
@@ -88,8 +112,15 @@ PY
 fi
 
 if [[ -z "$AUTHKEY" ]]; then
-  echo "error: failed to create Headscale authkey (is headscale healthy and is /var/run/headscale shared?)" >&2
+  AUTHKEY="$(create_authkey 2>/dev/null | awk 'NF {k=$0} END {print k}')" || true
+fi
+
+if [[ -z "$AUTHKEY" ]]; then
+  echo "error: failed to create Headscale authkey" >&2
+  echo "headscale users list:" >&2
   "${HS[@]}" users list >&2 || true
+  echo "headscale preauthkeys create (debug):" >&2
+  create_authkey >&2 || true
   exit 1
 fi
 
