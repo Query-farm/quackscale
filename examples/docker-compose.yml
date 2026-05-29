@@ -15,7 +15,7 @@ x-env: &env
   QUACK_PORT: "9494"
   QUACK_TAILNET_TOKEN: ${QUACK_TAILNET_TOKEN:-quackscale-demo-token}
   QUACKTAIL_QUIET: "1"
-  QUACKTAIL_DEMO_TIMEOUT_SEC: "30"
+  QUACKTAIL_DEMO_TIMEOUT_SEC: "45"
   QUACKTAIL_WAIT_ATTEMPTS: "15"
   QUACKTAIL_WAIT_POLL_SEC: "1"
   HEADSCALE_CONTROL_URL: http://headscale:8080
@@ -67,7 +67,11 @@ configs:
         v6: fd7a:115c:a1e0::/48
       derp:
         server:
-          enabled: false
+          enabled: true
+          region_id: 999
+          region_code: headscale
+          region_name: Headscale Embedded DERP
+          stun_listen_addr: 0.0.0.0:3478
         urls:
           - https://controlplane.tailscale.com/derpmap/default
         paths: []
@@ -105,6 +109,7 @@ services:
     command: serve
     ports:
       - "127.0.0.1:8080:8080"
+      - "3478:3478/udp"
     healthcheck:
       test: [CMD, headscale, health]
       interval: 5s

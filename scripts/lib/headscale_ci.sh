@@ -581,13 +581,6 @@ CREATE SECRET (
     SCOPE '${secret_scope}'
 );
 
-FROM quack_query(
-    '${attach_uri}',
-    'SELECT 1 AS probe',
-    token => '${token}',
-    disable_ssl => true
-);
-
 SQL
   if headscale_ci_quack_uri_is_local "$attach_uri"; then
     cat <<SQL

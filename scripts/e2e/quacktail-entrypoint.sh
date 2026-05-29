@@ -158,15 +158,14 @@ client_attach_uri() {
 
 write_client_session_sql() {
   local dest="${1:?dest path}"
-  {
-    cat "${WORK}/client_init.sql"
-    if [[ -f "${WORK}/client_quack.sql" ]]; then
-      cat "${WORK}/client_quack.sql"
-    else
+  if [[ -f "${WORK}/client_quack.sql" ]]; then
+    cat "${WORK}/client_quack.sql" >"$dest"
+  else
+    {
       cat "${WORK}/client_attach.sql"
       [[ -f "${WORK}/client_queries.sql" ]] && cat "${WORK}/client_queries.sql"
-    fi
-  } >"$dest"
+    } >"$dest"
+  fi
 }
 
 quacktail_dump_client_failure() {
@@ -184,10 +183,11 @@ quacktail_dump_client_failure() {
 
 run_duckdb_client_session() {
   local client_db="${1:?db}"
-  local session_sql="${2:?session sql}"
-  local out="${3:?out file}"
-  local demo_timeout="${4:?timeout}"
-  shift 4
+  local quack_sql="${2:?quack sql file}"
+  local init_sql="${3:?init sql file}"
+  local out="${4:?out file}"
+  local demo_timeout="${5:?timeout}"
+  shift 5
   local -a duckdb_extra=("$@")
   local tsnet_log="${WORK}/client-tsnet.log"
   local ext_cmd duckdb_rc=0
@@ -195,22 +195,26 @@ run_duckdb_client_session() {
   ext_cmd="$(quacktail_sql_extension_directory)"
   : >"$tsnet_log"
 
-  # One DuckDB session: tailscale_up then quack ATTACH/DML via -init (no stdin pipe).
+  # Proven flow: tailscale_up via -init (tsnet stays up); Quack ATTACH/DML on stdin — same DuckDB session.
   set +o pipefail
   if [[ "$QUIET" == "1" ]]; then
-    timeout "$demo_timeout" stdbuf -oL -eL "$DUCKDB" -bail -batch \
-      -cmd "$ext_cmd" "${duckdb_extra[@]}" "$client_db" -init "$session_sql" \
+    timeout "$demo_timeout" bash -c '
+      cat "$1" | stdbuf -oL -eL "$2" -bail -batch -cmd "$3" "$4" -init "$5" "${@:6}"
+    ' _ "$quack_sql" "$DUCKDB" "$ext_cmd" "$client_db" "$init_sql" \
+      "${duckdb_extra[@]}" \
       2>>"$tsnet_log" | quacktail_filter_demo_stream | tee "$out"
   else
-    timeout "$demo_timeout" stdbuf -oL -eL "$DUCKDB" -bail -batch \
-      -cmd "$ext_cmd" "${duckdb_extra[@]}" "$client_db" -init "$session_sql" \
+    timeout "$demo_timeout" bash -c '
+      cat "$1" | stdbuf -oL -eL "$2" -bail -batch -cmd "$3" "$4" -init "$5" "${@:6}"
+    ' _ "$quack_sql" "$DUCKDB" "$ext_cmd" "$client_db" "$init_sql" \
+      "${duckdb_extra[@]}" \
       2>&1 | quacktail_filter_demo_stream | tee "$out"
   fi
   duckdb_rc=${PIPESTATUS[0]}
   set -o pipefail
 
   if [[ "$duckdb_rc" -eq 124 ]]; then
-    echo "error: client demo timed out after ${demo_timeout}s (tailscale join + ATTACH should finish in seconds)" >&2
+    echo "error: client demo timed out after ${demo_timeout}s (tailnet join OK — check peer route to server Quack)" >&2
     quacktail_dump_client_failure
     return 124
   fi
@@ -220,15 +224,16 @@ run_duckdb_client_session() {
 run_client() {
   local client_db="${WORK}/client.duckdb"
   local attach_uri
-  local session_sql="${WORK}/client_session.sql"
+  local init_sql="${WORK}/client_init.sql"
+  local quack_sql="${WORK}/client_quack.sql"
+  local session_quack_sql="${WORK}/client_session_quack.sql"
   local out="${WORK}/client.out"
-  local demo_timeout="${QUACKTAIL_DEMO_TIMEOUT_SEC:-30}"
+  local demo_timeout="${QUACKTAIL_DEMO_TIMEOUT_SEC:-45}"
   local duckdb_rc=0
   local -a duckdb_extra=()
 
   wait_for_tailnet_server
   ensure_quack
-  ensure_server_hosts_mapping
   ensure_client_sql
   attach_uri="$(client_attach_uri)"
   if [[ -z "$attach_uri" ]]; then
@@ -236,7 +241,12 @@ run_client() {
     exit 1
   fi
 
-  write_client_session_sql "$session_sql"
+  if [[ -f "$quack_sql" ]]; then
+    :
+  else
+    quack_sql="$session_quack_sql"
+    write_client_session_sql "$quack_sql"
+  fi
 
   if [[ "$QUIET" == "1" ]]; then
     echo ""
@@ -245,13 +255,15 @@ run_client() {
     echo "→ join tailnet as ${CLIENT_HOST}, ATTACH ${attach_uri}, verify read/write ..."
     echo ""
   else
-    echo "=== client session SQL (-init) ==="
-    cat "$session_sql"
+    echo "=== client init SQL (-init) ==="
+    cat "$init_sql"
+    echo "=== client quack SQL (stdin) ==="
+    cat "$quack_sql"
     duckdb_extra=(-echo)
   fi
 
   duckdb_rc=0
-  run_duckdb_client_session "$client_db" "$session_sql" "$out" "$demo_timeout" \
+  run_duckdb_client_session "$client_db" "$quack_sql" "$init_sql" "$out" "$demo_timeout" \
     "${duckdb_extra[@]}" || duckdb_rc=$?
 
   if [[ "$duckdb_rc" -ne 0 ]]; then

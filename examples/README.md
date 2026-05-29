@@ -139,14 +139,12 @@ docker compose --profile test down --remove-orphans -v
 
 **Server restart loop** — check `docker compose logs quacktail-server`; for libtailscale detail: `docker compose exec quacktail-server tail -50 /work/server.log`
 
-**Client times out after `CREATE SECRET Success`** — server Quack not reachable. Recreate the server so it picks up `quack:0.0.0.0:9494` and writes `/work/quack_ready`:
+**Client times out after `CREATE SECRET Success`** — tailscale join succeeded; the stall is **cross-node Quack HTTP** (peer route), not Headscale registration. Ensure embedded DERP is up (`3478/udp` on headscale) and recreate the server:
 
 ```bash
-docker compose up -d --force-recreate quacktail-server
-docker compose logs quacktail-server   # should show quack:0.0.0.0 bind, not quack_uri()
+docker compose up -d --force-recreate headscale quacktail-server
+docker compose logs quacktail-server
 docker compose --profile test run --rm quacktail-client
 ```
-
-If the server exits during init, inspect `/work/server.log` inside the container.
 
 **`Multiple streaming scans or streaming scans + CTAS / insert`** — this is a **`quack` extension** planner limit, not QuackScale. It fires when one SQL statement both reads and writes the same attached Quack catalog (e.g. `INSERT … WHERE NOT EXISTS (SELECT … FROM remote.t)`). See [docs/QUACK_STREAMING.md](../docs/QUACK_STREAMING.md).

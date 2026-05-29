@@ -28,8 +28,13 @@ resolve_server_tailnet_ip() {
 }
 
 resolve_attach_uri() {
-  # Match server quack_uri() (hostname) — CI adds --add-host; compose adds /etc/hosts in entrypoint.
-  echo "quack:${SERVER_HOST}:${QUACK_PORT}"
+  local ip
+  ip="$(resolve_server_tailnet_ip)"
+  if [[ -n "$ip" ]]; then
+    echo "quack:${ip}:${QUACK_PORT}"
+  else
+    echo "quack:${SERVER_HOST}:${QUACK_PORT}"
+  fi
 }
 
 write_server_quack_sql() {
@@ -70,13 +75,6 @@ CREATE SECRET (
     TYPE quack,
     TOKEN '${QUACK_TOKEN}',
     SCOPE '${attach_uri}'
-);
-
-FROM quack_query(
-    '${attach_uri}',
-    'SELECT 1 AS probe',
-    token => '${QUACK_TOKEN}',
-    disable_ssl => true
 );
 
 ATTACH '${attach_uri}' AS remote (
@@ -160,7 +158,7 @@ if [[ -f "$WORK/server_setup.sql" && -f "$WORK/authkey" ]]; then
     || [[ -f "$WORK/client_demo.sql" && ! -f "$WORK/client_quack.sql" ]] \
     || { [[ -f "$WORK/client_quack.sql" ]] && grep -q 'NOT EXISTS' "$WORK/client_quack.sql"; } \
     || { [[ -f "$WORK/client_init.sql" ]] && ! grep -q "${CLIENT_STATE_DIR}" "$WORK/client_init.sql"; } \
-    || { [[ -f "$WORK/client_quack.sql" ]] && ! grep -q 'quack_query' "$WORK/client_quack.sql"; }; then
+    || { [[ -f "$WORK/client_quack.sql" ]] && grep -q 'quack_query' "$WORK/client_quack.sql"; }; then
     refresh_client_sql "$AUTHKEY"
     echo "✓ client SQL ready — attach ${ATTACH_URI}"
   fi
