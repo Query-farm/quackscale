@@ -107,7 +107,6 @@ services:
     command: serve
     ports:
       - "127.0.0.1:8080:8080"
-      - "3478:3478/udp"
     healthcheck:
       test: [CMD, headscale, health]
       interval: 5s

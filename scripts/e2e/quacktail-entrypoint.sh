@@ -89,9 +89,9 @@ ensure_server_hosts_mapping() {
     return 0
   fi
   if [[ "$QUIET" == "1" ]]; then
-    echo "→ ${SERVER_HOST} → ${ip} (/etc/hosts, matches server quack_uri())"
+    echo "→ ${SERVER_HOST} → ${ip} (/etc/hosts, tailscale_serve_local on :${QUACK_PORT:-9494})"
   else
-    echo "Mapping ${SERVER_HOST} -> ${ip} in /etc/hosts"
+    echo "Mapping ${SERVER_HOST} -> ${ip} in /etc/hosts (tailscale_serve_local)"
   fi
   if grep -qE "[[:space:]]${SERVER_HOST}$" /etc/hosts 2>/dev/null; then
     grep -vE "[[:space:]]${SERVER_HOST}$" /etc/hosts > /etc/hosts.quacktail || true
@@ -110,7 +110,7 @@ run_server() {
   rm -f "${WORK}/quack_ready"
   cat "${WORK}/server_setup.sql" "${WORK}/server_quack.sql" >"$INIT_SQL"
   if [[ "$QUIET" == "1" ]]; then
-    echo "→ quacktail-server: join tailnet + quack_serve on quack:0.0.0.0:${PORT}"
+    echo "→ quacktail-server: join tailnet + quack_serve(127.0.0.1:${PORT}) + tailscale_serve_local"
     echo "  (libtailscale logs → ${WORK}/server.log)"
   else
     echo "=== server init SQL ==="
@@ -234,6 +234,7 @@ run_client() {
 
   wait_for_tailnet_server
   ensure_quack
+  ensure_server_hosts_mapping
   ensure_client_sql
   attach_uri="$(client_attach_uri)"
   if [[ -z "$attach_uri" ]]; then

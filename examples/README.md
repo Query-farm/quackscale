@@ -17,7 +17,7 @@ docker compose up -d --force-recreate headscale quacktail-server
 docker compose --profile test run --rm quacktail-client
 ```
 
-Use `--force-recreate` on the server after script/SQL changes (otherwise the old DuckDB process keeps running without the new `quack:0.0.0.0` bind).
+Use `--force-recreate` on the server after script/SQL changes (otherwise the old DuckDB process keeps running without `tailscale_serve_local`).
 
 Expect `✓ Demo passed — two-node QuackTail cluster is working`.
 
@@ -45,7 +45,7 @@ Three services: `headscale`, `quacktail-server`, `quacktail-client` (test profil
 
 ```
 ✓ Headscale authkey ready — attach URI quack:quacktail-server:9494
-→ quacktail-server: join tailnet + quack_serve on quack:quacktail-server:9494
+→ quacktail-server: join tailnet + quack_serve(127.0.0.1:9494) + tailscale_serve_local
   (libtailscale logs → /work/server.log)
 ```
 

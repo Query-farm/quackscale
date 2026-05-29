@@ -490,11 +490,20 @@ headscale_ci_e2e_quack_secret_scope() {
   headscale_ci_e2e_quack_attach_uri "$@"
 }
 
-# Server: Quack on tailnet via quack_uri() (default), or loopback + tailscale_serve_local (legacy).
+# Server: loopback Quack + tailscale_serve_local (default — tsnet-in-process cross-node path).
 headscale_ci_sql_quack_serve() {
   local port="${1:-9494}"
-  case "${E2E_QUACK_SERVE_MODE:-tailnet}" in
-    loopback_serve)
+  case "${E2E_QUACK_SERVE_MODE:-loopback_serve}" in
+    direct|0.0.0.0)
+      cat <<SQL
+CALL quack_serve(
+    'quack:0.0.0.0:${port}',
+    allow_other_hostname => true,
+    token => quack_token()
+);
+SQL
+      ;;
+    loopback_serve|tailnet|*)
       cat <<SQL
 CALL quack_serve(
     'quack:127.0.0.1:${port}',
@@ -502,15 +511,6 @@ CALL quack_serve(
     token => quack_token()
 );
 CALL tailscale_serve_local(port => ${port});
-SQL
-      ;;
-    tailnet|*)
-      cat <<SQL
-CALL quack_serve(
-    'quack:0.0.0.0:${port}',
-    allow_other_hostname => true,
-    token => quack_token()
-);
 SQL
       ;;
   esac
