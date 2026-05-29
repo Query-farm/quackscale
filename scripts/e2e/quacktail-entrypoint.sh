@@ -81,6 +81,9 @@ resolve_server_tailnet_ip() {
 }
 
 ensure_server_hosts_mapping() {
+  # Legacy: map server hostname → tailnet IP in /etc/hosts for kernel sockets.
+  # Default off: tailscale_up(loopback_proxy => true) sets ALL_PROXY to tsnet SOCKS5.
+  [[ "${QUACKTAIL_MAP_SERVER_HOSTS:-0}" == "1" ]] || return 0
   local ip
   ip="$(resolve_server_tailnet_ip)"
   if [[ -z "$ip" ]]; then
@@ -88,7 +91,7 @@ ensure_server_hosts_mapping() {
     return 0
   fi
   if [[ "$QUIET" == "1" ]]; then
-    echo "→ ${SERVER_HOST} → ${ip} (/etc/hosts for tailscale_ping + ATTACH hostname)"
+    echo "→ ${SERVER_HOST} → ${ip} (/etc/hosts — QUACKTAIL_MAP_SERVER_HOSTS=1)"
   else
     echo "Mapping ${SERVER_HOST} -> ${ip} in /etc/hosts"
   fi

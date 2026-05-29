@@ -43,6 +43,20 @@ The libtailscale C API exposes `tailscale_set_authkey`, `tailscale_set_dir`, `ta
 
 Reference: [tsnet.Server · Tailscale Docs](https://tailscale.com/kb/1522/tsnet-server).
 
+## Loopback proxy (Quack HTTP over the tailnet)
+
+Embedded tsnet can dial peers (`tailscale_ping`), but **Quack uses normal HTTP/TCP** (curl). Kernel sockets do not reach tailnet IPs unless a full `tailscaled` is running.
+
+By default, `CALL tailscale_up(..., loopback_proxy => true)` starts libtailscale’s **loopback SOCKS5** server and sets `ALL_PROXY` / `HTTP_PROXY` to `socks5h://tsnet:<cred>@127.0.0.1:…` so Quack `quack_query` / `ATTACH` to `quack:peer:9494` route through tsnet — same role as userspace networking in the official Tailscale client.
+
+```sql
+CALL tailscale_up(hostname => 'my-client', authkey => '...', state_dir => '/var/lib/duckdb/ts');
+CALL tailscale_proxy_status();
+-- enabled=true, active=true, proxy_url=socks5h://tsnet:***@127.0.0.1:PORT
+```
+
+Disable with `loopback_proxy => false` if you run system `tailscaled` or only use tsnet dial APIs.
+
 ## Recommended patterns
 
 ### Production / servers — auth key

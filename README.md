@@ -169,10 +169,11 @@ Load with `LOAD quackscale;`. Use **`CALL`** for table functions (same style as 
 
 | Command | Description |
 |---------|-------------|
-| `CALL tailscale_up(...)` | Join tailnet; `authkey` or `TS_AUTHKEY`; params: `hostname`, `state_dir`, `control_url`, `ephemeral` |
+| `CALL tailscale_up(...)` | Join tailnet; `authkey` or `TS_AUTHKEY`; params: `hostname`, `state_dir`, `control_url`, `ephemeral`, `loopback_proxy` (default `true`) |
 | `CALL tailscale_login(...)` | Non-blocking join; returns `login_url` for browser auth |
 | `CALL tailscale_login_status()` | Poll login (`starting` / `needs_login` / `up` / `error`) |
 | `CALL tailscale_status()` | libtailscale linked?, running, hostname, tailnet IPs |
+| `CALL tailscale_proxy_status()` | Loopback SOCKS proxy (tsnet) for Quack HTTP — active after `tailscale_up` |
 
 ### Quack on tailnet (helpers; requires core `quack` for `quack_serve`)
 

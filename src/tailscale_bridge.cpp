@@ -165,6 +165,93 @@ void TailscaleBridge::Up(const string &hostname_in, const string &authkey, const
 	Up(config);
 }
 
+void TailscaleBridge::ClearProxyEnvironment() {
+	if (!proxy_status.active) {
+		return;
+	}
+	auto restore = [](const char *name, const string &value, bool had) {
+		if (had) {
+			setenv(name, value.c_str(), 1);
+		} else {
+			unsetenv(name);
+		}
+	};
+	restore("ALL_PROXY", saved_proxy_env.all_proxy_value, saved_proxy_env.all_proxy);
+	restore("all_proxy", saved_proxy_env.all_proxy_value, saved_proxy_env.all_proxy);
+	restore("HTTP_PROXY", saved_proxy_env.http_proxy_value, saved_proxy_env.http_proxy);
+	restore("http_proxy", saved_proxy_env.http_proxy_value, saved_proxy_env.http_proxy);
+	restore("HTTPS_PROXY", saved_proxy_env.https_proxy_value, saved_proxy_env.https_proxy);
+	restore("https_proxy", saved_proxy_env.https_proxy_value, saved_proxy_env.https_proxy);
+	restore("NO_PROXY", saved_proxy_env.no_proxy_value, saved_proxy_env.no_proxy);
+	restore("no_proxy", saved_proxy_env.no_proxy_value, saved_proxy_env.no_proxy);
+	proxy_status = TailscaleProxyStatus {};
+	saved_proxy_env = SavedProxyEnv {};
+}
+
+void TailscaleBridge::StartLoopbackProxy() {
+#ifdef QUACKSCALE_WITH_TAILSCALE
+	if (proxy_status.active) {
+		return;
+	}
+	if (!running) {
+		throw InvalidInputException("tailscale loopback proxy: call tailscale_up() first");
+	}
+	EnsureHandle();
+
+	char addr_buf[256] = {};
+	char proxy_cred[33] = {};
+	char local_cred[33] = {};
+	if (tailscale_loopback(handle, addr_buf, sizeof(addr_buf), proxy_cred, local_cred) != 0) {
+		throw IOException("tailscale loopback proxy failed: %s", LastErrorMessage());
+	}
+
+	auto save_env = [](const char *name, string &dest, bool &had) {
+		if (const char *value = std::getenv(name)) {
+			dest = value;
+			had = true;
+		}
+	};
+	save_env("ALL_PROXY", saved_proxy_env.all_proxy_value, saved_proxy_env.all_proxy);
+	save_env("HTTP_PROXY", saved_proxy_env.http_proxy_value, saved_proxy_env.http_proxy);
+	save_env("HTTPS_PROXY", saved_proxy_env.https_proxy_value, saved_proxy_env.https_proxy);
+	save_env("NO_PROXY", saved_proxy_env.no_proxy_value, saved_proxy_env.no_proxy);
+
+	auto proxy_url = StringUtil::Format("socks5h://tsnet:%s@%s", proxy_cred, addr_buf);
+	setenv("ALL_PROXY", proxy_url.c_str(), 1);
+	setenv("all_proxy", proxy_url.c_str(), 1);
+	setenv("HTTP_PROXY", proxy_url.c_str(), 1);
+	setenv("http_proxy", proxy_url.c_str(), 1);
+	setenv("HTTPS_PROXY", proxy_url.c_str(), 1);
+	setenv("https_proxy", proxy_url.c_str(), 1);
+
+	string no_proxy = "localhost,127.0.0.1,::1";
+	if (saved_proxy_env.no_proxy && !saved_proxy_env.no_proxy_value.empty()) {
+		no_proxy = saved_proxy_env.no_proxy_value + "," + no_proxy;
+	}
+	setenv("NO_PROXY", no_proxy.c_str(), 1);
+	setenv("no_proxy", no_proxy.c_str(), 1);
+
+	proxy_status.enabled = true;
+	proxy_status.active = true;
+	proxy_status.listen_addr = addr_buf;
+	proxy_status.proxy_url = StringUtil::Format("socks5h://tsnet:***@%s", addr_buf);
+#else
+	throw NotImplementedException("QuackScale was built without libtailscale.");
+#endif
+}
+
+void TailscaleBridge::MaybeStartLoopbackProxy(bool enable) {
+	proxy_status.enabled = enable;
+	if (!enable) {
+		return;
+	}
+	StartLoopbackProxy();
+}
+
+TailscaleProxyStatus TailscaleBridge::ProxyStatus() const {
+	return proxy_status;
+}
+
 void TailscaleBridge::Up(const TailscaleAuthConfig &config) {
 	std::lock_guard<std::mutex> guard(g_tailscale_mutex);
 #ifdef QUACKSCALE_WITH_TAILSCALE
@@ -182,6 +269,7 @@ void TailscaleBridge::Up(const TailscaleAuthConfig &config) {
 	running = true;
 	login_state = "up";
 	RefreshIPs();
+	MaybeStartLoopbackProxy(config.loopback_proxy);
 #else
 	(void)config;
 	throw NotImplementedException(
@@ -214,6 +302,10 @@ void TailscaleBridge::BeginInteractiveLogin(const TailscaleAuthConfig &config) {
 		login_message = "Connected";
 		hostname = config_copy.hostname;
 		RefreshIPs();
+		if (config_copy.loopback_proxy) {
+			std::lock_guard<std::mutex> guard(g_tailscale_mutex);
+			MaybeStartLoopbackProxy(true);
+		}
 	});
 
 	// Give tsnet a moment to print the interactive login URL on the log fd.
@@ -262,6 +354,7 @@ void TailscaleBridge::Shutdown() {
 	std::lock_guard<std::mutex> guard(g_tailscale_mutex);
 	log_capture.Stop();
 	JoinLoginThread();
+	ClearProxyEnvironment();
 #ifdef QUACKSCALE_WITH_TAILSCALE
 	if (handle >= 0) {
 		tailscale_clear_serve(handle);

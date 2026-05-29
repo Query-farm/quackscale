@@ -1,10 +1,42 @@
-# QuackTail node — DuckDB + quackscale from latest GitHub release, quack from core.
+# QuackTail node — DuckDB + quackscale + quack for compose demo.
 # Build from repo root: docker build -f examples/Dockerfile -t quacktail:local .
+#
+# BUILD_FROM_SOURCE=1 (default in compose): build DuckDB + quackscale from this repo.
+# BUILD_FROM_SOURCE=0: pull latest GitHub release binary instead.
+
+ARG BUILD_FROM_SOURCE=1
+ARG GITHUB_REPO=quackscience/duckdb-quackscale
+ARG HEADSCALE_VERSION=0.28.0
+ARG TARGETARCH
+
+FROM ubuntu:24.04 AS builder
+ARG BUILD_FROM_SOURCE
+ARG GITHUB_REPO
+
+ENV DEBIAN_FRONTEND=noninteractive
+RUN if [ "$BUILD_FROM_SOURCE" = "1" ]; then \
+      apt-get update \
+      && apt-get install -y --no-install-recommends bash ca-certificates curl git golang-go \
+         cmake ninja-build g++ make python3 \
+      && rm -rf /var/lib/apt/lists/*; \
+    fi
+
+WORKDIR /src
+COPY . /src/
+
+RUN if [ "$BUILD_FROM_SOURCE" = "1" ]; then \
+      git submodule update --init --recursive \
+      && GEN=ninja make release \
+      && install -d /out \
+      && install -m755 build/release/duckdb /out/duckdb \
+      && cp -a build/release/extension/quackscale /out/quackscale-ext 2>/dev/null || true; \
+    fi
 
 FROM ubuntu:24.04
 
-ARG GITHUB_REPO=quackscience/duckdb-quackscale
-ARG HEADSCALE_VERSION=0.28.0
+ARG BUILD_FROM_SOURCE
+ARG GITHUB_REPO
+ARG HEADSCALE_VERSION
 ARG TARGETARCH
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -12,10 +44,15 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends bash ca-certificates curl tini python3 \
     && rm -rf /var/lib/apt/lists/*
 
+COPY --from=builder /out/ /opt/quacktail-build/
 COPY scripts/ci_download_release_duckdb.sh /tmp/ci_download_release_duckdb.sh
 RUN chmod +x /tmp/ci_download_release_duckdb.sh \
-    && QUACKTAIL_RELEASE_DIR=/opt/quacktail-release GITHUB_REPOSITORY="${GITHUB_REPO}" \
-       bash -c 'eval "$(/tmp/ci_download_release_duckdb.sh latest)" && install -m755 "$DUCKDB" /usr/local/bin/duckdb && cp -a "$QUACKTAIL_RELEASE_ROOT/." /opt/quacktail/ 2>/dev/null || true' \
+    && if [ -x /opt/quacktail-build/duckdb ]; then \
+         install -m755 /opt/quacktail-build/duckdb /usr/local/bin/duckdb; \
+       else \
+         QUACKTAIL_RELEASE_DIR=/opt/quacktail-release GITHUB_REPOSITORY="${GITHUB_REPO}" \
+           bash -c 'eval "$(/tmp/ci_download_release_duckdb.sh latest)" && install -m755 "$DUCKDB" /usr/local/bin/duckdb && cp -a "$QUACKTAIL_RELEASE_ROOT/." /opt/quacktail/ 2>/dev/null || true'; \
+       fi \
     && rm -f /tmp/ci_download_release_duckdb.sh
 
 RUN case "${TARGETARCH:-amd64}" in \
@@ -32,6 +69,9 @@ ENV DUCKDB_EXTENSION_DIRECTORY=/duckdb_extensions
 ENV QUACK_PORT=9494
 
 RUN mkdir -p /duckdb_extensions \
+    && if [ -d /opt/quacktail-build/quackscale-ext ]; then \
+         cp -a /opt/quacktail-build/quackscale-ext/. /duckdb_extensions/; \
+       fi \
     && duckdb :memory: -batch -c "SET extension_directory='/duckdb_extensions'; INSTALL quack FROM core; LOAD quack; SELECT 1;" \
     || duckdb :memory: -batch -c "SET extension_directory='/duckdb_extensions'; INSTALL quack FROM core_nightly; LOAD quack; SELECT 1;"
 

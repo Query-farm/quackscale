@@ -15,6 +15,16 @@ struct TailscaleAuthConfig {
 	string control_url;
 	string state_dir;
 	bool ephemeral = false;
+	//! Start libtailscale loopback SOCKS (tsnet) and set ALL_PROXY/HTTP_PROXY for Quack HTTP.
+	bool loopback_proxy = true;
+};
+
+struct TailscaleProxyStatus {
+	bool enabled = false;
+	bool active = false;
+	string listen_addr;
+	//! socks5h://tsnet:***@127.0.0.1:port — password redacted for display
+	string proxy_url;
 };
 
 struct TailscaleLoginStatus {
@@ -54,6 +64,7 @@ public:
 	void Up(const TailscaleAuthConfig &config);
 	void BeginInteractiveLogin(const TailscaleAuthConfig &config);
 	TailscaleLoginStatus LoginStatus() const;
+	TailscaleProxyStatus ProxyStatus() const;
 	void Shutdown();
 
 	//! Tailscale Serve: expose listen_port on the tailnet, TCP-forward to 127.0.0.1:local_port.
@@ -81,6 +92,20 @@ private:
 	string LastErrorMessage() const;
 	void JoinLoginThread();
 	string ResolveAuthKey(const string &authkey) const;
+	void MaybeStartLoopbackProxy(bool enable);
+	void StartLoopbackProxy();
+	void ClearProxyEnvironment();
+
+	struct SavedProxyEnv {
+		bool all_proxy = false;
+		bool http_proxy = false;
+		bool https_proxy = false;
+		bool no_proxy = false;
+		string all_proxy_value;
+		string http_proxy_value;
+		string https_proxy_value;
+		string no_proxy_value;
+	};
 
 #ifdef QUACKSCALE_WITH_TAILSCALE
 	int handle = -1;
@@ -93,6 +118,8 @@ private:
 	string pending_login_url;
 	std::thread login_thread;
 	TailscaleLogCapture log_capture;
+	TailscaleProxyStatus proxy_status;
+	SavedProxyEnv saved_proxy_env;
 };
 
 } // namespace duckdb

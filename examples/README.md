@@ -2,7 +2,7 @@
 
 Two-node **Headscale + QuackTail** cluster on Linux — server and client DuckDB nodes on a shared tailnet, client `ATTACH`es the server's Quack endpoint.
 
-The image pulls the **latest** [GitHub release](https://github.com/quackscience/duckdb-quackscale/releases) and installs `quack` at build time.
+The image **builds DuckDB + quackscale from source by default** (`BUILD_FROM_SOURCE=1`). Set `BUILD_FROM_SOURCE=0` to use the latest [GitHub release](https://github.com/quackscience/duckdb-quackscale/releases) instead.
 
 **Requires:** Linux, Docker Compose v2, `/dev/net/tun`, outbound HTTPS.
 
@@ -49,17 +49,16 @@ Core services: `headscale`, `quacktail-server`, `quacktail-client` (test profile
   (libtailscale logs → /work/server.log)
 ```
 
-**Client** — one DuckDB session: join tailnet, `ATTACH` over server tailnet IP, insert + verify:
+**Client** — one DuckDB session: join tailnet (loopback SOCKS proxy auto-enabled), `ATTACH` over tailnet hostname, insert + verify:
 
 ```
 → waiting for quacktail-server on tailnet ...
 ✓ quacktail-server on tailnet
-→ quacktail-server → 100.64.x.x (/etc/hosts, matches server quack_uri())
 ✓ client SQL ready — attach quack:quacktail-server:9494
 
 QuackTail cluster demo
 ======================
-→ join tailnet as quacktail-client, ATTACH quack:quacktail-server:9494, verify read/write ...
+→ join tailnet, tailscale_ping quacktail-server:9494, quack_query, ATTACH quack:quacktail-server:9494 ...
 
 (tailscale_status, Success, PASSED summary — typically under 10s)
 
@@ -150,7 +149,14 @@ docker compose --profile debug run --rm tailscale-probe
 
 **Server restart loop** — check `docker compose logs quacktail-server`; for libtailscale detail: `docker compose exec quacktail-server tail -50 /work/server.log`
 
-**Client times out after `CREATE SECRET Success`** — tailnet join succeeded; stall is on `tailscale_ping`, `quack_query`, or `ATTACH`. Recreate the server after script changes:
+**Client times out after `CREATE SECRET Success`** — tailnet join succeeded; stall is on `tailscale_ping`, `quack_query`, or `ATTACH`. Ensure images were rebuilt from source (`BUILD_FROM_SOURCE=1`, default) so `loopback_proxy` is active. Check:
+
+```sql
+CALL tailscale_proxy_status();
+-- active=true, proxy_url=socks5h://tsnet:***@127.0.0.1:...
+```
+
+Recreate the server after script changes:
 
 ```bash
 docker compose up -d --force-recreate quacktail-server

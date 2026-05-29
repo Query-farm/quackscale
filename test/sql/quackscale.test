@@ -14,6 +14,11 @@ CALL tailscale_status();
 ----
 true	false	NULL	[]
 
+query IIII
+CALL tailscale_proxy_status();
+----
+false	false	NULL	NULL
+
 statement ok
 CALL quack_discover();
 
