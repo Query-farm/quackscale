@@ -63,8 +63,11 @@ ATTACH '${ATTACH_URI}' AS remote (
     DISABLE_SSL true
 );
 
-DELETE FROM remote.e2e_payload WHERE source = 'client';
-INSERT INTO remote.e2e_payload VALUES (2, 'insert-from-client', 'client');
+INSERT INTO remote.e2e_payload
+SELECT 2, 'insert-from-client', 'client'
+WHERE NOT EXISTS (
+    SELECT 1 FROM remote.e2e_payload WHERE source = 'client'
+);
 
 SELECT
     'PASSED' AS status,
@@ -266,8 +269,11 @@ SELECT 'after_attach|ok';
 SQL
 
 cat >"$WORK/client_queries.sql" <<SQL
-DELETE FROM remote.e2e_payload WHERE source = 'client';
-INSERT INTO remote.e2e_payload VALUES (2, 'insert-from-client', 'client');
+INSERT INTO remote.e2e_payload
+SELECT 2, 'insert-from-client', 'client'
+WHERE NOT EXISTS (
+    SELECT 1 FROM remote.e2e_payload WHERE source = 'client'
+);
 
 SELECT 'row_count|' || COUNT(*)::VARCHAR FROM remote.e2e_payload;
 SELECT 'client_msg|' || msg FROM remote.e2e_payload WHERE source = 'client';
