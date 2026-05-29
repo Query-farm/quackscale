@@ -50,45 +50,84 @@ headscale_ci_ensure_user() {
 headscale_ci_user_id() {
   headscale_ci_ensure_user
   docker exec "$HEADSCALE_CONTAINER" headscale users list -o json \
-    | python3 -c "
-import json, sys
-d = json.load(sys.stdin)
-users = d.get('users', d if isinstance(d, list) else [])
-for u in users:
-    if u.get('name') == '${HEADSCALE_CI_USER}':
-        print(u['id'])
+    | HEADSCALE_CI_USER="$HEADSCALE_CI_USER" python3 - <<'PY'
+import json, os, sys
+
+def as_list(value):
+    if isinstance(value, list):
+        return value
+    if isinstance(value, dict):
+        for key in ("users", "Users", "nodes", "Nodes", "preAuthKeys", "pre_auth_keys"):
+            if key in value and isinstance(value[key], list):
+                return value[key]
+        return [value]
+    return []
+
+def field(obj, *names):
+    for name in names:
+        if name in obj and obj[name] is not None:
+            return obj[name]
+    return None
+
+target = os.environ["HEADSCALE_CI_USER"]
+users = as_list(json.load(sys.stdin))
+for user in users:
+    name = field(user, "name", "Name", "username", "Username")
+    if name == target:
+        print(field(user, "id", "Id", "ID"))
         sys.exit(0)
 if users:
-    print(users[0]['id'])
-else:
-    sys.exit(1)
-"
+    print(field(users[0], "id", "Id", "ID"))
+    sys.exit(0)
+sys.exit(1)
+PY
 }
 
 headscale_ci_create_authkey() {
-  local user_id
-  user_id="$(headscale_ci_user_id)"
+  local user_id=""
+  user_id="$(headscale_ci_user_id 2>/dev/null || true)"
+
+  local -a create_cmd=(headscale preauthkeys create --reusable --expiration 24h -o json)
+  if [[ -n "$user_id" ]]; then
+    create_cmd+=(--user "$user_id")
+  fi
+
   local authkey
   authkey="$(
-    docker exec "$HEADSCALE_CONTAINER" headscale preauthkeys create \
-      --user "$user_id" --reusable --expiration 1h -o json \
-      | python3 -c "
+    docker exec "$HEADSCALE_CONTAINER" "${create_cmd[@]}" \
+      | python3 - <<'PY'
 import json, sys
-d = json.load(sys.stdin)
-key = d.get('key') or d.get('preAuthKey', {}).get('key')
-if not key and isinstance(d, dict) and 'preAuthKey' in d:
-    key = d['preAuthKey'].get('key')
-print(key or '')
-"
-  )"
+
+def field(obj, *names):
+    for name in names:
+        if isinstance(obj, dict) and name in obj and obj[name]:
+            return obj[name]
+    return None
+
+raw = sys.stdin.read().strip()
+if not raw:
+    sys.exit(1)
+data = json.loads(raw)
+key = field(data, "key", "Key")
+if not key and isinstance(data, dict):
+    nested = field(data, "preAuthKey", "pre_auth_key", "PreAuthKey")
+    if isinstance(nested, dict):
+        key = field(nested, "key", "Key")
+print(key or "")
+PY
+  )" || true
+
   if [[ -z "$authkey" ]]; then
-    authkey="$(
-      docker exec "$HEADSCALE_CONTAINER" headscale preauthkeys create \
-        --user "$user_id" --reusable --expiration 1h | awk 'NF {key=$0} END {print key}'
-    )"
+    local -a plain_cmd=(headscale preauthkeys create --reusable --expiration 24h)
+    if [[ -n "$user_id" ]]; then
+      plain_cmd+=(--user "$user_id")
+    fi
+    authkey="$(docker exec "$HEADSCALE_CONTAINER" "${plain_cmd[@]}" | awk 'NF {key=$0} END {print key}')"
   fi
+
   if [[ -z "$authkey" ]]; then
     echo "error: failed to obtain Headscale preauth key" >&2
+    docker exec "$HEADSCALE_CONTAINER" headscale users list -o json >&2 || true
     return 1
   fi
   printf '%s' "$authkey"
@@ -102,15 +141,33 @@ headscale_ci_node_ipv4() {
       docker exec "$HEADSCALE_CONTAINER" headscale nodes list -o json \
         | python3 -c "
 import json, sys
+
+def as_list(value):
+    if isinstance(value, list):
+        return value
+    if isinstance(value, dict):
+        for key in ('nodes', 'Nodes'):
+            if key in value and isinstance(value[key], list):
+                return value[key]
+        return [value]
+    return []
+
+def field(obj, *names):
+    for name in names:
+        if name in obj and obj[name] is not None:
+            return obj[name]
+    return None
+
 hostname = sys.argv[1]
-d = json.load(sys.stdin)
-nodes = d.get('nodes', d if isinstance(d, list) else [])
-for n in nodes:
-    name = n.get('givenName') or n.get('given_name') or n.get('name') or ''
+for node in as_list(json.load(sys.stdin)):
+    name = field(node, 'givenName', 'given_name', 'name', 'Name') or ''
     if name == hostname or name.startswith(hostname + '.'):
-        addrs = n.get('ipAddresses') or n.get('ip_addresses') or n.get('addresses') or []
+        addrs = field(node, 'ipAddresses', 'ip_addresses', 'addresses', 'Addresses') or []
+        if isinstance(addrs, str):
+            addrs = [addrs]
         for addr in addrs:
-            if ':' not in str(addr):
+            addr = str(addr)
+            if ':' not in addr:
                 print(addr)
                 sys.exit(0)
 sys.exit(1)
@@ -123,7 +180,7 @@ sys.exit(1)
     sleep 2
   done
   echo "error: no tailnet IPv4 found for node '$hostname'" >&2
-  docker exec "$HEADSCALE_CONTAINER" headscale nodes list >&2 || true
+  docker exec "$HEADSCALE_CONTAINER" headscale nodes list -o json >&2 || true
   return 1
 }
 
