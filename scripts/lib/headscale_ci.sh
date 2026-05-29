@@ -453,27 +453,16 @@ headscale_ci_quack_uri_local() {
   echo "quack:127.0.0.1"
 }
 
-# ATTACH URI for container e2e. Default: Docker network alias (quack:quacktail-server:9494).
-# Tailnet IP ATTACH needs tsnet peer routing / tailscale_listen — set E2E_QUACK_ATTACH_VIA=tailnet to try.
+# Client ATTACH URI — MagicDNS FQDN (Tailscale/Headscale). Set E2E_QUACK_ATTACH_HOST=ip for tailnet IP.
 headscale_ci_e2e_quack_attach_uri() {
   local server_ip="$1"
   local port="${2:-9494}"
-  local via="${E2E_QUACK_ATTACH_VIA:-docker}"
   local server_host="${E2E_SERVER_HOST:-quacktail-server}"
-  case "$via" in
-    tailnet)
-      headscale_ci_quack_uri_for_ip "$server_ip" "$port"
-      ;;
-    docker)
-      headscale_ci_quack_uri_for_ip "$server_host" "$port"
-      ;;
-    localhost | 127.0.0.1)
-      headscale_ci_quack_uri_local
-      ;;
-    *)
-      headscale_ci_quack_uri_for_ip "$via" "$port"
-      ;;
-  esac
+  if [[ "${E2E_QUACK_ATTACH_HOST:-magicdns}" == "ip" ]]; then
+    headscale_ci_quack_uri_for_ip "$server_ip" "$port"
+  else
+    headscale_ci_quack_client_uri "$server_host" "$port"
+  fi
 }
 
 # Secret SCOPE must match the server URI (docs: SCOPE 'quack:localhost').
@@ -481,11 +470,21 @@ headscale_ci_e2e_quack_secret_scope() {
   headscale_ci_e2e_quack_attach_uri "$@"
 }
 
-# Server bind URI. CI same-host default: 0.0.0.0 (reachable via 127.0.0.1 ATTACH).
-# Tailnet/production: 0.0.0.0 + allow_other_hostname. Explicit 127.0.0.1 also supported.
+# Server: quack_uri() after tailscale_up (see docs/PLAN.md). Override with E2E_QUACK_SERVE_URI=0.0.0.0.
 headscale_ci_sql_quack_serve() {
   local port="${1:-9494}"
-  local bind_host="${E2E_QUACK_BIND_HOST:-0.0.0.0}"
+  local mode="${E2E_QUACK_SERVE_URI:-tailnet}"
+  if [[ "$mode" == "tailnet" ]]; then
+    cat <<SQL
+CALL quack_serve(
+    quack_uri(),
+    allow_other_hostname => true,
+    token => quack_token()
+);
+SQL
+    return 0
+  fi
+  local bind_host="${mode}"
   if [[ "$bind_host" == "localhost" ]]; then
     bind_host="127.0.0.1"
   fi

@@ -46,6 +46,8 @@ quacktail_ci_start_server() {
 
   echo "Starting QuackTail server container '$QUACKTAIL_SERVER_CONTAINER' on '$HEADSCALE_DOCKER_NETWORK' ..."
   docker run -d --name "$QUACKTAIL_SERVER_CONTAINER" \
+    --cap-add=NET_ADMIN \
+    --device=/dev/net/tun \
     --network "$HEADSCALE_DOCKER_NETWORK" \
     --network-alias "$hostname" \
     -v "${work_dir}:/work" \
@@ -59,8 +61,9 @@ quacktail_ci_start_server() {
 
 quacktail_ci_wait_server() {
   local port="${1:-9494}"
+  local server_ip="${2:-}"
   local attempt=0
-  echo "Waiting for Quack server in container (port ${port}) ..."
+  echo "Waiting for Quack server (tailnet; port ${port}) ..."
   while (( attempt < 60 )); do
     attempt=$((attempt + 1))
     if ! quacktail_ci_server_running; then
@@ -74,8 +77,12 @@ quacktail_ci_wait_server() {
       return 1
     fi
     if docker logs "$QUACKTAIL_SERVER_CONTAINER" 2>&1 | grep -q "listen_url"; then
-      if quacktail_ci_container_http_open "$QUACKTAIL_SERVER_CONTAINER" "$port"; then
-        echo "Quack server is ready in container (attempt ${attempt})"
+      if [[ -n "$server_ip" ]] && quacktail_ci_container_http_open "$QUACKTAIL_SERVER_CONTAINER" "$port" "$server_ip"; then
+        echo "Quack server is ready on tailnet (attempt ${attempt})"
+        return 0
+      fi
+      if [[ -z "$server_ip" ]] && quacktail_ci_container_http_open "$QUACKTAIL_SERVER_CONTAINER" "$port"; then
+        echo "Quack server is ready (attempt ${attempt})"
         return 0
       fi
     fi
@@ -93,28 +100,14 @@ quacktail_ci_wait_server() {
 quacktail_ci_container_http_open() {
   local container="${1:?container}"
   local port="${2:?port}"
-  docker exec "$container" curl -fsS -m 3 -o /dev/null "http://127.0.0.1:${port}/" 2>/dev/null \
+  local host="${3:-127.0.0.1}"
+  docker exec "$container" curl -fsS -m 3 -o /dev/null "http://${host}:${port}/" 2>/dev/null \
     && return 0
-  docker exec "$container" curl -fsS -m 3 -o /dev/null "http://127.0.0.1:${port}/quack" 2>/dev/null \
+  docker exec "$container" curl -fsS -m 3 -o /dev/null "http://${host}:${port}/quack" 2>/dev/null \
     && return 0
   local code
-  code="$(docker exec "$container" curl -sS -m 3 -o /dev/null -w '%{http_code}' "http://127.0.0.1:${port}/" 2>/dev/null || echo 000)"
+  code="$(docker exec "$container" curl -sS -m 3 -o /dev/null -w '%{http_code}' "http://${host}:${port}/" 2>/dev/null || echo 000)"
   [[ "$code" != "000" ]]
-}
-
-# Verify Quack is reachable on the Docker network before client ATTACH.
-quacktail_ci_preflight_attach_host() {
-  local attach_host="${1:?attach host}"
-  local port="${2:?port}"
-  echo "Preflight: HTTP to http://${attach_host}:${port}/ from network ${HEADSCALE_DOCKER_NETWORK} ..."
-  local code
-  code="$(docker run --rm --network "$HEADSCALE_DOCKER_NETWORK" "$QUACKTAIL_IMAGE" \
-    curl -sS -m 5 -o /dev/null -w '%{http_code}' "http://${attach_host}:${port}/" 2>/dev/null || echo 000)"
-  if [[ "$code" == "000" ]]; then
-    echo "error: cannot reach Quack at ${attach_host}:${port} on Docker network" >&2
-    return 1
-  fi
-  echo "Preflight ok: HTTP ${code} from ${attach_host}:${port}"
 }
 
 quacktail_ci_run_client() {
@@ -128,6 +121,8 @@ quacktail_ci_run_client() {
 
   echo "Running QuackTail client container (timeout ${timeout_sec}s) ..."
   timeout "$timeout_sec" docker run --name "$QUACKTAIL_CLIENT_CONTAINER" \
+    --cap-add=NET_ADMIN \
+    --device=/dev/net/tun \
     --network "$HEADSCALE_DOCKER_NETWORK" \
     -v "${work_dir}:/work" \
     -v "${duckdb_bin}:/usr/local/bin/duckdb:ro" \

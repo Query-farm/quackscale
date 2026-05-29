@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Two-node QuackTail e2e over Headscale — server and client run in Docker on quacktail-ci.
+# Two-node QuackTail e2e: both nodes join Headscale (tsnet), Quack over the tailnet.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -13,7 +13,7 @@ SERVER_HOST="${E2E_SERVER_HOST:-quacktail-server}"
 CLIENT_HOST="${E2E_CLIENT_HOST:-quacktail-client}"
 QUACK_PORT="${E2E_QUACK_PORT:-9494}"
 CLIENT_TIMEOUT="${E2E_CLIENT_TIMEOUT_SEC:-120}"
-export E2E_QUACK_ATTACH_VIA="${E2E_QUACK_ATTACH_VIA:-docker}"
+TAILNET_MESH_WAIT="${E2E_TAILNET_MESH_WAIT_SEC:-15}"
 export E2E_SERVER_HOST="$SERVER_HOST"
 
 WORK="${E2E_WORK:-${GITHUB_WORKSPACE:-$ROOT}/.e2e-work}"
@@ -54,7 +54,7 @@ fi
 
 echo "Using DuckDB: $DUCKDB"
 echo "E2e work directory: $WORK"
-echo "E2e mode: Docker containers on network ${HEADSCALE_DOCKER_NETWORK} (Quack ATTACH via ${E2E_QUACK_ATTACH_VIA})"
+echo "E2e: Headscale tailnet (serve quack_uri(), ATTACH via MagicDNS)"
 
 quacktail_ci_build_image "$ROOT"
 
@@ -80,7 +80,6 @@ else
 fi
 export QUACK_TAILNET_TOKEN="$QUACK_TOKEN"
 
-# Paths inside the container (/work is bind-mounted from $WORK).
 CONTAINER_SERVER_STATE="/work/server-tailscale"
 CONTAINER_CLIENT_STATE="/work/client-tailscale"
 
@@ -102,26 +101,24 @@ SQL
   headscale_ci_sql_quack_serve "$QUACK_PORT"
 } >"$WORK/server_quack.sql"
 
-echo "=== Starting QuackTail server container ($SERVER_HOST) ==="
-echo "--- SQL: server_setup.sql + server_quack.sql → server_init.sql (in container) ---"
+echo "=== Starting QuackTail server ($SERVER_HOST) ==="
 cat "$WORK/server_setup.sql"
 echo "--- server_quack.sql ---"
 cat "$WORK/server_quack.sql"
 quacktail_ci_start_server "$DUCKDB" "$WORK" "$SERVER_HOST" "$QUACK_PORT"
-quacktail_ci_wait_server "$QUACK_PORT"
 
-echo "Resolving server tailnet IP from Headscale ..."
+echo "Waiting for server node on Headscale ..."
 SERVER_IP="$(headscale_ci_node_ipv4 "$SERVER_HOST" 60)"
 echo "Server tailnet IP: ${SERVER_IP}"
 echo "Server MagicDNS: $(headscale_ci_tailnet_fqdn "$SERVER_HOST")"
+quacktail_ci_wait_server "$QUACK_PORT" "$SERVER_IP"
 
 SERVER_QUACK_URI="$(headscale_ci_e2e_quack_attach_uri "$SERVER_IP" "$QUACK_PORT")"
 SERVER_QUACK_SCOPE="$SERVER_QUACK_URI"
 echo "Client will ATTACH: ${SERVER_QUACK_URI} (SCOPE ${SERVER_QUACK_SCOPE})"
-if [[ "$E2E_QUACK_ATTACH_VIA" == "docker" ]]; then
-  echo "Note: Quack uses Docker network DNS; tailnet join is validated via quack_discover before ATTACH."
-  quacktail_ci_preflight_attach_host "$SERVER_HOST" "$QUACK_PORT"
-fi
+
+echo "Waiting ${TAILNET_MESH_WAIT}s for tailnet mesh ..."
+sleep "$TAILNET_MESH_WAIT"
 
 {
   cat <<SQL
@@ -146,14 +143,14 @@ SELECT 'server_msg|' || msg FROM remote.e2e_payload WHERE source = 'server';
 SQL
 } >"$WORK/client.sql"
 
-echo "=== Running QuackTail client container ($CLIENT_HOST) ==="
+echo "=== Running QuackTail client ($CLIENT_HOST) ==="
 set +e
 quacktail_ci_run_client "$DUCKDB" "$WORK" "$QUACK_PORT" "$CLIENT_TIMEOUT" 2>&1 | tee "$CLIENT_LOG"
 CLIENT_RC=${PIPESTATUS[0]}
 set -e
 
 if (( CLIENT_RC == 124 )); then
-  echo "error: client container timed out after ${CLIENT_TIMEOUT}s (check ATTACH URI and DISABLE_SSL)" >&2
+  echo "error: client timed out after ${CLIENT_TIMEOUT}s — try E2E_QUACK_ATTACH_HOST=ip if MagicDNS fails" >&2
   CLIENT_RC=124
 fi
 
@@ -169,11 +166,11 @@ echo "=== Result rows ==="
 echo "$CLIENT_OUT" | grep -E 'discover_count|row_count|client_msg|server_msg|insert-from-client|seed-from-server' || true
 
 echo "$CLIENT_OUT" | grep -qE 'discover_count\|(1|2)' || {
-  echo "error: client quack_discover failed (expected discover_count|1 or |2)" >&2
+  echo "error: client quack_discover failed" >&2
   echo "$CLIENT_OUT" >&2
   exit 1
 }
-echo "ok: client on tailnet (quack_discover returned endpoints)"
+echo "ok: client on tailnet"
 
 echo "$CLIENT_OUT" | grep -q 'insert-from-client' || {
   echo "error: client INSERT row not found" >&2
