@@ -81,8 +81,7 @@ resolve_server_tailnet_ip() {
 }
 
 ensure_server_hosts_mapping() {
-  # Legacy: map server hostname → tailnet IP in /etc/hosts for kernel sockets.
-  # Default off: tailscale_up(loopback_proxy => true) sets ALL_PROXY to tsnet SOCKS5.
+  # Default off: tailscale_up joins only; CALL tailscale_quack_proxy() before Quack client ops.
   [[ "${QUACKTAIL_MAP_SERVER_HOSTS:-0}" == "1" ]] || return 0
   local ip
   ip="$(resolve_server_tailnet_ip)"

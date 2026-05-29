@@ -33,6 +33,11 @@ CALL tailscale_ping(host => '10.0.0.1');
 tailscale_ping: call tailscale_up() first
 
 statement error
+CALL tailscale_quack_proxy();
+----
+tailscale loopback proxy: call tailscale_up() first
+
+statement error
 SELECT quack_uri();
 ----
 Tailscale is not up

@@ -47,15 +47,21 @@ Reference: [tsnet.Server · Tailscale Docs](https://tailscale.com/kb/1522/tsnet-
 
 Embedded tsnet can dial peers (`tailscale_ping`), but **Quack uses normal HTTP/TCP** (curl). Kernel sockets do not reach tailnet IPs unless a full `tailscaled` is running.
 
-By default, `CALL tailscale_up(..., loopback_proxy => true)` starts libtailscale’s **loopback SOCKS5** server and sets `ALL_PROXY` / `HTTP_PROXY` to `socks5h://tsnet:<cred>@127.0.0.1:…` so Quack `quack_query` / `ATTACH` to `quack:peer:9494` route through tsnet — same role as userspace networking in the official Tailscale client.
+By default, `CALL tailscale_up(...)` **only joins the tailnet** — it does not start the SOCKS proxy (starting it inline broke `tailscale_serve_local` and could hang join).
+
+Before Quack `quack_query` / `ATTACH` to a remote peer, call:
 
 ```sql
 CALL tailscale_up(hostname => 'my-client', authkey => '...', state_dir => '/var/lib/duckdb/ts');
+CALL tailscale_quack_proxy();  -- sets ALL_PROXY=socks5h://tsnet:...@127.0.0.1:...
 CALL tailscale_proxy_status();
--- enabled=true, active=true, proxy_url=socks5h://tsnet:***@127.0.0.1:PORT
 ```
 
-Disable with `loopback_proxy => false` if you run system `tailscaled` or only use tsnet dial APIs.
+`tailscale_quack_proxy()` starts libtailscale loopback SOCKS and sets `ALL_PROXY` / `all_proxy` only (not `HTTP_PROXY`, which breaks tsnet LocalClient). `headscale` is added to `NO_PROXY`.
+
+Legacy: `loopback_proxy => true` on `tailscale_up` still works but is discouraged.
+
+Disable entirely with `loopback_proxy => false` if you run system `tailscaled`.
 
 ## Recommended patterns
 

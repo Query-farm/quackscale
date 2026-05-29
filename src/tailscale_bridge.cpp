@@ -178,10 +178,6 @@ void TailscaleBridge::ClearProxyEnvironment() {
 	};
 	restore("ALL_PROXY", saved_proxy_env.all_proxy_value, saved_proxy_env.all_proxy);
 	restore("all_proxy", saved_proxy_env.all_proxy_value, saved_proxy_env.all_proxy);
-	restore("HTTP_PROXY", saved_proxy_env.http_proxy_value, saved_proxy_env.http_proxy);
-	restore("http_proxy", saved_proxy_env.http_proxy_value, saved_proxy_env.http_proxy);
-	restore("HTTPS_PROXY", saved_proxy_env.https_proxy_value, saved_proxy_env.https_proxy);
-	restore("https_proxy", saved_proxy_env.https_proxy_value, saved_proxy_env.https_proxy);
 	restore("NO_PROXY", saved_proxy_env.no_proxy_value, saved_proxy_env.no_proxy);
 	restore("no_proxy", saved_proxy_env.no_proxy_value, saved_proxy_env.no_proxy);
 	proxy_status = TailscaleProxyStatus {};
@@ -212,19 +208,14 @@ void TailscaleBridge::StartLoopbackProxy() {
 		}
 	};
 	save_env("ALL_PROXY", saved_proxy_env.all_proxy_value, saved_proxy_env.all_proxy);
-	save_env("HTTP_PROXY", saved_proxy_env.http_proxy_value, saved_proxy_env.http_proxy);
-	save_env("HTTPS_PROXY", saved_proxy_env.https_proxy_value, saved_proxy_env.https_proxy);
 	save_env("NO_PROXY", saved_proxy_env.no_proxy_value, saved_proxy_env.no_proxy);
 
 	auto proxy_url = StringUtil::Format("socks5h://tsnet:%s@%s", proxy_cred, addr_buf);
+	// Only ALL_PROXY — do not set HTTP_PROXY/HTTPS_PROXY to socks5h (breaks tsnet LocalClient / curl).
 	setenv("ALL_PROXY", proxy_url.c_str(), 1);
 	setenv("all_proxy", proxy_url.c_str(), 1);
-	setenv("HTTP_PROXY", proxy_url.c_str(), 1);
-	setenv("http_proxy", proxy_url.c_str(), 1);
-	setenv("HTTPS_PROXY", proxy_url.c_str(), 1);
-	setenv("https_proxy", proxy_url.c_str(), 1);
 
-	string no_proxy = "localhost,127.0.0.1,::1";
+	string no_proxy = "localhost,127.0.0.1,::1,headscale";
 	if (saved_proxy_env.no_proxy && !saved_proxy_env.no_proxy_value.empty()) {
 		no_proxy = saved_proxy_env.no_proxy_value + "," + no_proxy;
 	}
@@ -245,6 +236,12 @@ void TailscaleBridge::MaybeStartLoopbackProxy(bool enable) {
 	if (!enable) {
 		return;
 	}
+	StartLoopbackProxy();
+}
+
+void TailscaleBridge::EnableQuackProxy() {
+	std::lock_guard<std::mutex> guard(g_tailscale_mutex);
+	proxy_status.enabled = true;
 	StartLoopbackProxy();
 }
 

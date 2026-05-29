@@ -377,6 +377,31 @@ static void QuackscaleProxyStatusFunction(ClientContext &context, TableFunctionI
 	bind.finished = true;
 }
 
+struct QuackscaleQuackProxyBindData : public TableFunctionData {
+	bool finished = false;
+};
+
+static unique_ptr<FunctionData> QuackscaleQuackProxyBind(ClientContext &context, TableFunctionBindInput &input,
+                                                         vector<LogicalType> &return_types, vector<string> &names) {
+	return_types = {LogicalType::BOOLEAN, LogicalType::VARCHAR, LogicalType::VARCHAR};
+	names = {"active", "listen_addr", "proxy_url"};
+	return make_uniq<QuackscaleQuackProxyBindData>();
+}
+
+static void QuackscaleQuackProxyFunction(ClientContext &context, TableFunctionInput &data_p, DataChunk &output) {
+	auto &bind = data_p.bind_data->CastNoConst<QuackscaleQuackProxyBindData>();
+	if (bind.finished) {
+		return;
+	}
+	TailscaleBridge::Get().EnableQuackProxy();
+	auto proxy = TailscaleBridge::Get().ProxyStatus();
+	output.SetCardinality(1);
+	output.SetValue(0, 0, Value::BOOLEAN(proxy.active));
+	output.SetValue(1, 0, proxy.listen_addr.empty() ? Value() : Value(proxy.listen_addr));
+	output.SetValue(2, 0, proxy.proxy_url.empty() ? Value() : Value(proxy.proxy_url));
+	bind.finished = true;
+}
+
 static void LoadInternal(ExtensionLoader &loader) {
 	TableFunction up_function("tailscale_up", {}, QuackscaleUpFunction, QuackscaleUpBind);
 	RegisterAuthParameters(up_function);
@@ -394,6 +419,9 @@ static void LoadInternal(ExtensionLoader &loader) {
 
 	loader.RegisterFunction(
 	    TableFunction("tailscale_proxy_status", {}, QuackscaleProxyStatusFunction, QuackscaleProxyStatusBind));
+
+	loader.RegisterFunction(TableFunction("tailscale_quack_proxy", {}, QuackscaleQuackProxyFunction,
+	                                      QuackscaleQuackProxyBind));
 
 	TableFunction discover_function("quack_discover", {}, QuackscaleDiscoverFunction, QuackscaleDiscoverBind);
 	discover_function.named_parameters["port"] = LogicalType::BIGINT;

@@ -585,6 +585,8 @@ CALL tailscale_up(
     ephemeral => true
 );
 
+CALL tailscale_quack_proxy();
+
 CALL tailscale_ping(host => '${server_host}', port => ${quack_port});
 
 $(headscale_ci_sql_set_extension_directory "$(headscale_ci_container_extension_directory)")

@@ -65,12 +65,19 @@ write_client_session_sql() {
   local authkey="${1:?authkey required}"
   local attach_uri="${2:?attach uri required}"
   local ping_sql=""
+  local quack_proxy_sql=""
   local ext_dir="/duckdb_extensions"
   if command -v duckdb >/dev/null 2>&1 \
     && duckdb :memory: -batch -csv -noheader -c \
       "SET extension_directory='${ext_dir}'; LOAD quackscale; SELECT COUNT(*) FROM duckdb_functions() WHERE function_name='tailscale_ping';" \
       2>/dev/null | grep -qx '1'; then
     ping_sql="CALL tailscale_ping(host => '${SERVER_HOST}', port => ${QUACK_PORT});"
+  fi
+  if command -v duckdb >/dev/null 2>&1 \
+    && duckdb :memory: -batch -csv -noheader -c \
+      "SET extension_directory='${ext_dir}'; LOAD quackscale; SELECT COUNT(*) FROM duckdb_functions() WHERE function_name='tailscale_quack_proxy';" \
+      2>/dev/null | grep -qx '1'; then
+    quack_proxy_sql="CALL tailscale_quack_proxy();"
   fi
   cat >"$WORK/client_session.sql" <<SQL
 LOAD quackscale;
@@ -82,6 +89,8 @@ CALL tailscale_up(
     state_dir => '${CLIENT_STATE_DIR}',
     ephemeral => true
 );
+
+${quack_proxy_sql}
 
 ${ping_sql}
 
@@ -215,7 +224,8 @@ if [[ -f "$WORK/server_setup.sql" && -f "$WORK/authkey" ]]; then
     || { [[ -f "$WORK/client_init.sql" ]] && ! grep -q "${CLIENT_STATE_DIR}" "$WORK/client_init.sql"; } \
     || { [[ -f "$WORK/client_quack.sql" ]] && grep -qE "quack:100\.64\." "$WORK/client_quack.sql"; } \
     || { [[ -f "$WORK/client_session.sql" ]] && ! grep -q 'tailscale_ping' "$WORK/client_session.sql"; } \
-    || { [[ -f "$WORK/client_session.sql" ]] && ! grep -q 'quack_query' "$WORK/client_session.sql"; }; then
+    || { [[ -f "$WORK/client_session.sql" ]] && ! grep -q 'quack_query' "$WORK/client_session.sql"; } \
+    || { [[ -f "$WORK/client_session.sql" ]] && ! grep -q 'tailscale_quack_proxy' "$WORK/client_session.sql"; }; then
     refresh_client_sql "$AUTHKEY"
     echo "✓ client SQL ready — attach ${ATTACH_URI}"
   fi
