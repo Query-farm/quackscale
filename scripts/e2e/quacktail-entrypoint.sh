@@ -3,6 +3,9 @@
 # Server lifecycle matches duckdb-quack-infra boot.sh:
 #   sleep infinity | duckdb -init /path/to/init.sql
 # https://github.com/duckdb/duckdb-quack-infra/blob/main/boot.sh
+#
+# Client: one long-lived DuckDB (-init tailscale_up), then bash mesh wait + cross-node
+# curl gate, then ATTACH/queries on the same stdin stream (tsnet stays up throughout).
 set -euo pipefail
 
 DUCKDB="${DUCKDB_BIN:-/usr/local/bin/duckdb}"
@@ -27,6 +30,16 @@ ensure_quack() {
     || "$DUCKDB" :memory: -batch -c "INSTALL quack FROM core; LOAD quack; SELECT 1;"
 }
 
+quacktail_curl_tailnet_http() {
+  local host="${1:?host}"
+  local port="${2:?port}"
+  curl -fsS -m 15 -o /dev/null "http://${host}:${port}/quack" 2>/dev/null && return 0
+  curl -fsS -m 15 -o /dev/null "http://${host}:${port}/" 2>/dev/null && return 0
+  local code
+  code="$(curl -sS -m 15 -o /dev/null -w '%{http_code}' "http://${host}:${port}/" 2>/dev/null || echo 000)"
+  [[ "$code" != "000" ]]
+}
+
 run_server() {
   ensure_quack
   if [[ ! -f "${WORK}/server_setup.sql" || ! -f "${WORK}/server_quack.sql" ]]; then
@@ -43,13 +56,30 @@ run_server() {
 
 run_client() {
   ensure_quack
-  if [[ ! -f "${WORK}/client.sql" ]]; then
-    echo "error: missing ${WORK}/client.sql" >&2
+  local client_db="${WORK}/client.duckdb"
+  local server_ip="${E2E_SERVER_IP:?E2E_SERVER_IP required for client}"
+  local mesh_wait="${E2E_CLIENT_MESH_WAIT_SEC:-20}"
+
+  if [[ ! -f "${WORK}/client_init.sql" || ! -f "${WORK}/client_attach.sql" ]]; then
+    echo "error: missing ${WORK}/client_init.sql or client_attach.sql" >&2
     exit 1
   fi
-  echo "=== client SQL (single DuckDB session: tailscale_up → ATTACH → queries) ==="
-  cat "${WORK}/client.sql"
-  exec "$DUCKDB" :memory: -batch -echo -f "${WORK}/client.sql"
+
+  echo "=== client init SQL (-init; DuckDB stays running for ATTACH) ==="
+  cat "${WORK}/client_init.sql"
+  echo "=== client attach SQL (after mesh wait + cross-node curl gate) ==="
+  cat "${WORK}/client_attach.sql"
+
+  {
+    sleep "$mesh_wait"
+    echo "=== tailnet TCP gate: curl http://${server_ip}:${PORT}/ (cross-node from client container) ==="
+    if ! quacktail_curl_tailnet_http "$server_ip" "$PORT"; then
+      echo "error: cross-node tailnet TCP gate failed (${server_ip}:${PORT})" >&2
+      exit 1
+    fi
+    echo "ok: cross-node tailnet TCP gate passed (${server_ip}:${PORT})"
+    cat "${WORK}/client_attach.sql"
+  } | "$DUCKDB" "$client_db" -init "${WORK}/client_init.sql" -batch -echo
 }
 
 case "$ROLE" in

@@ -4,10 +4,12 @@ Two DuckDB containers join **Headscale** via `tailscale_up`. Quack listens on **
 
 ## Flow
 
-1. **Server:** `tailscale_up` → `quack_serve('quack:127.0.0.1:9494', allow_other_hostname => true, …)` → `CALL tailscale_serve_local(port => 9494)`
-2. **Client:** one DuckDB session — `tailscale_up` → `ATTACH 'quack:<server-tailnet-ip>:9494'` → queries (tsnet stays up for the whole session)
+1. **Server:** long-running `sleep infinity | duckdb -init` → `tailscale_up` → `quack_serve('quack:127.0.0.1:9494', allow_other_hostname => true, …)` → `CALL tailscale_serve_local(port => 9494)`
+2. **Client:** one DuckDB session — `-init` runs `tailscale_up` (process stays alive) → mesh wait → **cross-node curl gate** to server tailnet IP → `ATTACH` + queries on same stdin stream
 
 Quack stays local; quackscale uses libtailscale `SetServeConfig` TCP forward (same idea as `tailscale serve --tcp=9494 localhost:9494`).
+
+Server readiness curl (server → own tailnet IP) is **not** a cross-node check. The client entrypoint curls server IP from the client container while DuckDB/tsnet is still running.
 
 ## Env overrides
 
@@ -15,6 +17,7 @@ Quack stays local; quackscale uses libtailscale `SetServeConfig` TCP forward (sa
 |----------|---------|---------|
 | `E2E_QUACK_ATTACH_HOST` | `ip` | Client URI (`magicdns` when tsnet accepts tailnet DNS) |
 | `E2E_TAILNET_MESH_WAIT_SEC` | `15` | Pause after server ready, before client container starts |
+| `E2E_CLIENT_MESH_WAIT_SEC` | `20` | Pause inside client after `tailscale_up`, before curl gate + ATTACH |
 
 ## Run
 

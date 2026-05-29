@@ -79,7 +79,7 @@ quacktail_ci_wait_server() {
     if docker logs "$QUACKTAIL_SERVER_CONTAINER" 2>&1 | grep -q "listen_url"; then
       if docker logs "$QUACKTAIL_SERVER_CONTAINER" 2>&1 | grep -qE "local_forward|127\.0\.0\.1:${port}"; then
         if [[ -n "$server_ip" ]] && quacktail_ci_container_http_open "$QUACKTAIL_SERVER_CONTAINER" "$port" "$server_ip"; then
-          echo "Quack reachable on tailnet ${server_ip}:${port} (attempt ${attempt})"
+          echo "Quack reachable on server own tailnet ${server_ip}:${port} (attempt ${attempt}; not cross-node)"
           return 0
         fi
       fi
@@ -130,6 +130,8 @@ quacktail_ci_run_client() {
     -e QUACKTAIL_ROLE=client \
     -e QUACKTAIL_WORK=/work \
     -e "QUACK_PORT=${port}" \
+    -e "E2E_SERVER_IP=${E2E_SERVER_IP:?E2E_SERVER_IP must be set}" \
+    -e "E2E_CLIENT_MESH_WAIT_SEC=${E2E_CLIENT_MESH_WAIT_SEC:-20}" \
     -e "QUACK_TAILNET_TOKEN=${QUACK_TAILNET_TOKEN:-}" \
     "$QUACKTAIL_IMAGE"
 }

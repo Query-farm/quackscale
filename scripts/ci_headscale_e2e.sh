@@ -12,7 +12,7 @@ QUACK_TOKEN="${QUACK_TAILNET_TOKEN:-quackscale-e2e-shared-token}"
 SERVER_HOST="${E2E_SERVER_HOST:-quacktail-server}"
 CLIENT_HOST="${E2E_CLIENT_HOST:-quacktail-client}"
 QUACK_PORT="${E2E_QUACK_PORT:-9494}"
-CLIENT_TIMEOUT="${E2E_CLIENT_TIMEOUT_SEC:-120}"
+CLIENT_TIMEOUT="${E2E_CLIENT_TIMEOUT_SEC:-180}"
 TAILNET_MESH_WAIT="${E2E_TAILNET_MESH_WAIT_SEC:-15}"
 export E2E_SERVER_HOST="$SERVER_HOST"
 
@@ -128,6 +128,12 @@ SQL
   headscale_ci_sql_tailscale_up "$CLIENT_HOST" "$CONTAINER_CLIENT_STATE" "$AUTHKEY"
   cat <<SQL
 
+SELECT 'client_tailscale_up|done';
+SQL
+} >"$WORK/client_init.sql"
+
+{
+  cat <<SQL
 CREATE TEMP TABLE _discover AS SELECT * FROM quack_discover();
 SELECT 'discover_count|' || COUNT(*)::VARCHAR;
 
@@ -141,7 +147,9 @@ SELECT 'row_count|' || COUNT(*)::VARCHAR FROM remote.e2e_payload;
 SELECT 'client_msg|' || msg FROM remote.e2e_payload WHERE source = 'client';
 SELECT 'server_msg|' || msg FROM remote.e2e_payload WHERE source = 'server';
 SQL
-} >"$WORK/client.sql"
+} >"$WORK/client_attach.sql"
+
+export E2E_SERVER_IP="$SERVER_IP"
 
 echo "=== Running QuackTail client ($CLIENT_HOST) ==="
 set +e
@@ -161,6 +169,13 @@ if (( CLIENT_RC != 0 )); then
   headscale_ci_logs
   exit 1
 fi
+
+echo "$CLIENT_OUT" | grep -q 'cross-node tailnet TCP gate passed' || {
+  echo "error: cross-node tailnet TCP gate did not pass" >&2
+  echo "$CLIENT_OUT" >&2
+  exit 1
+}
+echo "ok: cross-node tailnet TCP gate"
 
 echo "=== Result rows ==="
 echo "$CLIENT_OUT" | grep -E 'discover_count|row_count|client_msg|server_msg|insert-from-client|seed-from-server' || true
