@@ -406,6 +406,13 @@ headscale_ci_quack_client_uri() {
   echo "quack:$(headscale_ci_tailnet_fqdn "$hostname"):${port}"
 }
 
+# Reach peers by tailnet IP (tsnet dials IPs directly; MagicDNS needs accept-dns on the node).
+headscale_ci_quack_uri_for_ip() {
+  local ip="$1"
+  local port="${2:-9494}"
+  echo "quack:${ip}:${port}"
+}
+
 # Bind Quack on all interfaces (required for tailnet/tsnet; do not bind tailnet IP or MagicDNS name).
 headscale_ci_sql_quack_serve() {
   local port="${1:-9494}"

@@ -177,9 +177,11 @@ else
   exit 1
 fi
 SERVER_DNS="$(headscale_ci_tailnet_fqdn "$SERVER_HOST")"
-SERVER_QUACK_URI="$(headscale_ci_quack_client_uri "$SERVER_HOST" "$QUACK_PORT")"
-echo "Server MagicDNS name: ${SERVER_DNS}"
-echo "Client Quack URI: ${SERVER_QUACK_URI}"
+SERVER_QUACK_URI_DNS="$(headscale_ci_quack_client_uri "$SERVER_HOST" "$QUACK_PORT")"
+SERVER_QUACK_URI="$(headscale_ci_quack_uri_for_ip "$SERVER_IP" "$QUACK_PORT")"
+echo "Server MagicDNS name (Headscale): ${SERVER_DNS}"
+echo "Client Quack URI (tailnet IP for tsnet): ${SERVER_QUACK_URI}"
+echo "Client Quack URI (MagicDNS, when nodes accept-dns): ${SERVER_QUACK_URI_DNS}"
 
 {
   cat <<SQL
@@ -199,7 +201,7 @@ SERVER_PID=$!
 
 sleep 2
 e2e_wait_for_quack_server
-echo "Clients will connect via MagicDNS: ${SERVER_QUACK_URI}"
+echo "Client will ATTACH via tailnet IP: ${SERVER_QUACK_URI}"
 
 {
   cat <<SQL
@@ -215,11 +217,9 @@ CREATE SECRET (
     SCOPE '${SERVER_QUACK_URI}'
 );
 
-.mode csv
-.separator |
-
+-- Local quack_discover() lists this node's tailnet endpoints (proves tailscale_up on client).
 CREATE TEMP TABLE _discover AS SELECT * FROM quack_discover();
-SELECT 'discover_count', COUNT(*)::VARCHAR FROM _discover;
+SELECT 'discover_count|' || COUNT(*)::VARCHAR;
 
 ATTACH '${SERVER_QUACK_URI}' AS remote (
     TYPE quack,
@@ -228,9 +228,9 @@ ATTACH '${SERVER_QUACK_URI}' AS remote (
 
 INSERT INTO remote.e2e_payload VALUES (2, 'insert-from-client', 'client');
 
-SELECT 'row_count', COUNT(*)::VARCHAR FROM remote.e2e_payload;
-SELECT 'client_msg', msg FROM remote.e2e_payload WHERE source = 'client';
-SELECT 'server_msg', msg FROM remote.e2e_payload WHERE source = 'server';
+SELECT 'row_count|' || COUNT(*)::VARCHAR FROM remote.e2e_payload;
+SELECT 'client_msg|' || msg FROM remote.e2e_payload WHERE source = 'client';
+SELECT 'server_msg|' || msg FROM remote.e2e_payload WHERE source = 'server';
 SQL
 } >"$WORK/client.sql"
 
@@ -238,11 +238,13 @@ echo "=== Running QuackTail client ($CLIENT_HOST) ==="
 echo "--- SQL: client.sql ---"
 cat "$WORK/client.sql"
 echo "--- DuckDB output ---"
-CLIENT_OUT=""
-CLIENT_OUT="$("$DUCKDB" :memory: -batch -echo -f "$WORK/client.sql" 2>&1 | tee -a "$CLIENT_LOG")"
+: >"$CLIENT_LOG"
+"$DUCKDB" :memory: -batch -echo -f "$WORK/client.sql" 2>&1 | tee -a "$CLIENT_LOG"
 CLIENT_RC=${PIPESTATUS[0]}
+CLIENT_OUT="$(cat "$CLIENT_LOG")"
 if (( CLIENT_RC != 0 )); then
   echo "error: client DuckDB failed (exit $CLIENT_RC)" >&2
+  tail -100 "$CLIENT_LOG" >&2 || true
   headscale_ci_logs
   exit 1
 fi
@@ -264,9 +266,9 @@ assert_client_row() {
 }
 
 if echo "$CLIENT_OUT" | grep -qE 'discover_count\|(1|2)'; then
-  echo "ok: quack_discover found server"
+  echo "ok: client on tailnet (quack_discover returned endpoints)"
 else
-  echo "error: quack_discover failed (expected discover_count 1 or 2)" >&2
+  echo "error: client quack_discover failed (expected discover_count|1 or |2)" >&2
   echo "full client output:" >&2
   echo "$CLIENT_OUT" >&2
   exit 1

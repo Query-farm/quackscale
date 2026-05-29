@@ -37,6 +37,9 @@ policy:
   path: /etc/headscale/policy.hujson
 
 dns:
+  # MagicDNS: hostname.base_domain for nodes (see https://headscale.net/stable/ref/dns/).
+  # DuckDB/tsnet has no accept-dns C API yet — e2e clients ATTACH via tailnet IP.
+  # extra_records can add static A records; dynamic peers use headscale_ci_write_extra_records.
   magic_dns: true
   base_domain: quackscale-ci.test
   override_local_dns: true
@@ -44,6 +47,7 @@ dns:
     global:
       - 1.1.1.1
       - 1.0.0.1
+  extra_records: []
 
 logtail:
   enabled: false
