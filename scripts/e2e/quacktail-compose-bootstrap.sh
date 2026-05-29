@@ -41,17 +41,6 @@ SQL
 
 write_client_demo_sql() {
   cat >"$WORK/client_demo.sql" <<SQL
-CREATE TEMP TABLE _discover AS SELECT * FROM quack_discover();
-SELECT * FROM _discover;
-
-SELECT q AS probe_result
-FROM quack_query(
-    '${ATTACH_URI}',
-    'SELECT 1 AS q',
-    token => '${QUACK_TOKEN}',
-    disable_ssl => true
-);
-
 CREATE SECRET (
     TYPE quack,
     TOKEN '${QUACK_TOKEN}',
@@ -75,6 +64,16 @@ SELECT
     (SELECT msg FROM remote.e2e_payload WHERE source = 'server') AS server_row,
     (SELECT msg FROM remote.e2e_payload WHERE source = 'client') AS client_row,
     (SELECT COUNT(*)::INTEGER FROM remote.e2e_payload) AS total_rows;
+
+SELECT q AS probe_result
+FROM quack_query(
+    '${ATTACH_URI}',
+    'SELECT 1 AS q',
+    token => '${QUACK_TOKEN}',
+    disable_ssl => true
+);
+
+SELECT * FROM quack_discover();
 SQL
 }
 
@@ -82,7 +81,7 @@ if [[ -f "$WORK/server_setup.sql" && -f "$WORK/authkey" ]]; then
   AUTHKEY="$(cat "$WORK/authkey")"
   if [[ "${COMPOSE_REFRESH_CLIENT_SQL:-}" == "1" ]] \
     || [[ ! -f "$WORK/client_demo.sql" ]] \
-    || ! grep -q '_discover AS' "$WORK/client_demo.sql" 2>/dev/null \
+    || grep -q '_discover AS' "$WORK/client_demo.sql" 2>/dev/null \
     || ! grep -q "${CLIENT_STATE_DIR}" "$WORK/client_init.sql" 2>/dev/null; then
     write_client_init_sql "$AUTHKEY"
     write_client_demo_sql
@@ -239,19 +238,6 @@ SQL
 write_client_demo_sql
 
 cat >"$WORK/client_attach.sql" <<SQL
-CREATE TEMP TABLE _discover AS SELECT * FROM quack_discover();
-SELECT 'discover_count|' || COUNT(*)::VARCHAR;
-
-SELECT 'before_quack_query|${ATTACH_URI}';
-
-SELECT 'quack_query_probe|' || CAST(q AS VARCHAR)
-FROM quack_query(
-    '${ATTACH_URI}',
-    'SELECT 1 AS q',
-    token => '${QUACK_TOKEN}',
-    disable_ssl => true
-);
-
 SELECT 'before_attach|${ATTACH_URI}';
 
 CREATE SECRET (
@@ -278,6 +264,16 @@ WHERE NOT EXISTS (
 SELECT 'row_count|' || COUNT(*)::VARCHAR FROM remote.e2e_payload;
 SELECT 'client_msg|' || msg FROM remote.e2e_payload WHERE source = 'client';
 SELECT 'server_msg|' || msg FROM remote.e2e_payload WHERE source = 'server';
+
+SELECT 'quack_query_probe|' || CAST(q AS VARCHAR)
+FROM quack_query(
+    '${ATTACH_URI}',
+    'SELECT 1 AS q',
+    token => '${QUACK_TOKEN}',
+    disable_ssl => true
+);
+
+SELECT 'discover_count|' || COUNT(*)::VARCHAR FROM quack_discover();
 SQL
 
 echo "✓ Headscale authkey ready — attach URI ${ATTACH_URI}"

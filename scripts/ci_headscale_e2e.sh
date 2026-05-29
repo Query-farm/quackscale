@@ -114,21 +114,30 @@ SERVER_QUACK_SCOPE="$SERVER_QUACK_URI"
 echo "Client will ATTACH: ${SERVER_QUACK_URI}"
 
 {
-  cat <<SQL
-CREATE TEMP TABLE _discover AS SELECT * FROM quack_discover();
-SELECT 'discover_count|' || COUNT(*)::VARCHAR;
-
-SQL
   headscale_ci_sql_quack_client_attach "$SERVER_QUACK_URI" "$QUACK_TOKEN" "$SERVER_QUACK_SCOPE"
 } >"$WORK/client_attach.sql"
 
 {
   cat <<SQL
-INSERT INTO remote.e2e_payload VALUES (2, 'insert-from-client', 'client');
+INSERT INTO remote.e2e_payload
+SELECT 2, 'insert-from-client', 'client'
+WHERE NOT EXISTS (
+    SELECT 1 FROM remote.e2e_payload WHERE source = 'client'
+);
 
 SELECT 'row_count|' || COUNT(*)::VARCHAR FROM remote.e2e_payload;
 SELECT 'client_msg|' || msg FROM remote.e2e_payload WHERE source = 'client';
 SELECT 'server_msg|' || msg FROM remote.e2e_payload WHERE source = 'server';
+
+SELECT 'quack_query_probe|' || CAST(q AS VARCHAR)
+FROM quack_query(
+    '${SERVER_QUACK_URI}',
+    'SELECT 1 AS q',
+    token => '${QUACK_TOKEN}',
+    disable_ssl => true
+);
+
+SELECT 'discover_count|' || COUNT(*)::VARCHAR FROM quack_discover();
 SQL
 } >"$WORK/client_queries.sql"
 

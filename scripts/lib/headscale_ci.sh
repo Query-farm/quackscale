@@ -524,22 +524,12 @@ headscale_ci_quack_uri_is_local() {
   esac
 }
 
-# Client: quack_query probe (same HTTP stack as ATTACH) then CREATE SECRET + ATTACH.
+# Client: CREATE SECRET + ATTACH (writes first; streaming reads run in client_queries.sql).
 headscale_ci_sql_quack_client_attach() {
   local attach_uri="$1"
   local token="$2"
   local secret_scope="$3"
   cat <<SQL
-SELECT 'before_quack_query|${attach_uri}';
-
-SELECT 'quack_query_probe|' || CAST(q AS VARCHAR)
-FROM quack_query(
-    '${attach_uri}',
-    'SELECT 1 AS q',
-    token => '${token}',
-    disable_ssl => true
-);
-
 SELECT 'before_attach|${attach_uri}';
 
 SQL

@@ -34,7 +34,7 @@ maybe_compose_bootstrap() {
   [[ "${QUACKTAIL_AUTO_BOOTSTRAP:-}" == "1" ]] || return 0
   [[ -f "${WORK}/server_setup.sql" && -f "${WORK}/client_demo.sql" && -f "${WORK}/client_init.sql" ]] \
     || /usr/local/bin/quacktail-compose-bootstrap.sh
-  if [[ -f "${WORK}/client_demo.sql" ]] && ! grep -q 'quack_discover' "${WORK}/client_demo.sql" 2>/dev/null; then
+  if [[ -f "${WORK}/client_demo.sql" ]] && grep -q '_discover AS' "${WORK}/client_demo.sql" 2>/dev/null; then
     /usr/local/bin/quacktail-compose-bootstrap.sh
   fi
 }

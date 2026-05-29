@@ -37,7 +37,7 @@ Three services: `headscale`, `quacktail-server`, `quacktail-client` (test profil
 ✓ quacktail-server on tailnet
 → join tailnet as quacktail-client, discover, ATTACH quack:quacktail-server:9494 ...
 
-(tailscale_up table, quack_discover, probe_result, PASSED summary — streamed as they run)
+(tailscale_status table, probe_result, PASSED summary, quack_discover — streamed as they run)
 
 ✓ Demo passed — two-node QuackTail cluster is working
 ```
