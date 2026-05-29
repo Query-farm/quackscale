@@ -28,3 +28,5 @@ eval "$(./scripts/ci_download_release_duckdb.sh latest)"
 ```
 
 GitHub Actions: **Headscale QuackTail e2e** (`workflow_dispatch`, `release_tag` defaults to latest). The release must include `tailscale_serve_local`.
+
+Set `DUCKDB_EXTENSION_DIRECTORY` to a shared path on the host; it is mounted into e2e containers at `/duckdb_extensions` so `LOAD quack` uses the same install as the workflow preflight.

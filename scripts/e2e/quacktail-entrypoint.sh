@@ -21,13 +21,24 @@ if [[ ! -x "$DUCKDB" ]]; then
 fi
 
 ensure_quack() {
+  local ext_dir="${DUCKDB_EXTENSION_DIRECTORY:-}"
+  if [[ -n "$ext_dir" ]]; then
+    mkdir -p "$ext_dir"
+    export DUCKDB_EXTENSION_DIRECTORY="$ext_dir"
+    echo "=== DUCKDB_EXTENSION_DIRECTORY=$ext_dir ==="
+  fi
   echo "=== ensure quack extension ==="
-  if "$DUCKDB" :memory: -batch -c "LOAD quack; SELECT 1;" 2>/dev/null; then
+  if "$DUCKDB" :memory: -batch -c "LOAD quack; SELECT 1;"; then
+    "$DUCKDB" :memory: -batch -echo -c \
+      "SELECT extension_name, loaded, install_path FROM duckdb_extensions() WHERE extension_name='quack';"
     return 0
   fi
-  echo "Installing quack (core_nightly, then core) ..."
-  "$DUCKDB" :memory: -batch -c "FORCE INSTALL quack FROM core_nightly; LOAD quack; SELECT 1;" \
-    || "$DUCKDB" :memory: -batch -c "INSTALL quack FROM core; LOAD quack; SELECT 1;"
+  echo "Installing quack (core, then core_nightly) ..."
+  if ! "$DUCKDB" :memory: -batch -c "INSTALL quack FROM core; LOAD quack; SELECT 1;"; then
+    "$DUCKDB" :memory: -batch -c "INSTALL quack FROM core_nightly; LOAD quack; SELECT 1;"
+  fi
+  "$DUCKDB" :memory: -batch -echo -c \
+    "SELECT extension_name, loaded, install_path FROM duckdb_extensions() WHERE extension_name='quack';"
 }
 
 quacktail_curl_tailnet_http() {

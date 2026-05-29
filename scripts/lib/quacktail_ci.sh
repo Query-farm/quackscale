@@ -13,6 +13,36 @@ quacktail_ci_require_docker() {
   headscale_ci_require_docker
 }
 
+# Shared extension cache: mount host DUCKDB_EXTENSION_DIRECTORY into containers.
+quacktail_ci_docker_ext_setup() {
+  QUACKTAIL_DOCKER_EXT_ARGS=()
+  if [[ -n "${DUCKDB_EXTENSION_DIRECTORY:-}" ]]; then
+    mkdir -p "$DUCKDB_EXTENSION_DIRECTORY"
+    QUACKTAIL_DOCKER_EXT_ARGS+=(
+      -v "${DUCKDB_EXTENSION_DIRECTORY}:/duckdb_extensions:rw"
+      -e DUCKDB_EXTENSION_DIRECTORY=/duckdb_extensions
+    )
+  fi
+}
+
+# Verify/install quack on the host DuckDB before starting containers.
+quacktail_ci_verify_duckdb_quack() {
+  local duckdb_bin="${1:?duckdb binary}"
+  quacktail_ci_docker_ext_setup
+  if [[ -n "${DUCKDB_EXTENSION_DIRECTORY:-}" ]]; then
+    export DUCKDB_EXTENSION_DIRECTORY
+    echo "Host DUCKDB_EXTENSION_DIRECTORY=$DUCKDB_EXTENSION_DIRECTORY"
+  fi
+  if ! "$duckdb_bin" :memory: -batch -c "LOAD quack; SELECT 1;"; then
+    echo "Installing quack on host (core, then core_nightly) ..."
+    if ! "$duckdb_bin" :memory: -batch -c "INSTALL quack FROM core; LOAD quack; SELECT 1;"; then
+      "$duckdb_bin" :memory: -batch -c "INSTALL quack FROM core_nightly; LOAD quack; SELECT 1;"
+    fi
+  fi
+  "$duckdb_bin" :memory: -batch -echo -c \
+    "SELECT extension_name, loaded, install_path FROM duckdb_extensions() WHERE extension_name='quack';"
+}
+
 quacktail_ci_build_image() {
   quacktail_ci_require_docker
   local root="${1:?repo root required}"
@@ -44,6 +74,7 @@ quacktail_ci_start_server() {
   quacktail_ci_require_docker
   docker rm -f "$QUACKTAIL_SERVER_CONTAINER" >/dev/null 2>&1 || true
 
+  quacktail_ci_docker_ext_setup
   echo "Starting QuackTail server container '$QUACKTAIL_SERVER_CONTAINER' on '$HEADSCALE_DOCKER_NETWORK' ..."
   docker run -d --name "$QUACKTAIL_SERVER_CONTAINER" \
     --cap-add=NET_ADMIN \
@@ -52,6 +83,7 @@ quacktail_ci_start_server() {
     --network-alias "$hostname" \
     -v "${work_dir}:/work" \
     -v "${duckdb_bin}:/usr/local/bin/duckdb:ro" \
+    "${QUACKTAIL_DOCKER_EXT_ARGS[@]}" \
     -e QUACKTAIL_ROLE=server \
     -e QUACKTAIL_WORK=/work \
     -e "QUACK_PORT=${port}" \
@@ -123,6 +155,7 @@ quacktail_ci_run_client() {
   local server_host="${E2E_SERVER_HOST:-quacktail-server}"
   local server_ip="${E2E_SERVER_IP:?E2E_SERVER_IP must be set}"
 
+  quacktail_ci_docker_ext_setup
   echo "Running QuackTail client container (timeout ${timeout_sec}s) ..."
   echo "Client /etc/hosts: ${server_host} -> ${server_ip}"
   timeout "$timeout_sec" docker run --name "$QUACKTAIL_CLIENT_CONTAINER" \
@@ -132,6 +165,7 @@ quacktail_ci_run_client() {
     --add-host "${server_host}:${server_ip}" \
     -v "${work_dir}:/work" \
     -v "${duckdb_bin}:/usr/local/bin/duckdb:ro" \
+    "${QUACKTAIL_DOCKER_EXT_ARGS[@]}" \
     -e QUACKTAIL_ROLE=client \
     -e QUACKTAIL_WORK=/work \
     -e "QUACK_PORT=${port}" \

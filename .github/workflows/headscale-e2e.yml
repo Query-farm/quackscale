@@ -85,18 +85,33 @@ jobs:
 
       - name: Install quack extension
         run: |
+          set -euo pipefail
+          EXT_DIR="$RUNNER_TEMP/duckdb_extensions"
+          mkdir -p "$EXT_DIR"
+          echo "DUCKDB_EXTENSION_DIRECTORY=$EXT_DIR" >> "$GITHUB_ENV"
+          export DUCKDB_EXTENSION_DIRECTORY="$EXT_DIR"
           if ! "$DUCKDB" :memory: -batch -c "LOAD quack; SELECT 1;"; then
             "$DUCKDB" :memory: -batch -c "INSTALL quack FROM core; LOAD quack; SELECT 1;" \
               || "$DUCKDB" :memory: -batch -c "INSTALL quack FROM core_nightly; LOAD quack; SELECT 1;"
           fi
+          "$DUCKDB" :memory: -batch -echo -c "
+            LOAD quack;
+            SELECT extension_name, loaded, install_path
+            FROM duckdb_extensions()
+            WHERE extension_name='quack';
+          "
 
       - name: Run Headscale QuackTail e2e
         env:
           HEADSCALE_AUTHKEY_FILE: ${{ runner.temp }}/headscale-authkey
           SKIP_HEADSCALE_VERIFY: "1"
           HEADSCALE_ALREADY_RUNNING: "1"
+          DUCKDB_EXTENSION_DIRECTORY: ${{ runner.temp }}/duckdb_extensions
         run: |
+          set -euo pipefail
           chmod +x scripts/ci_headscale_e2e.sh scripts/lib/headscale_ci.sh scripts/lib/quacktail_ci.sh scripts/e2e/quacktail-entrypoint.sh
+          export DUCKDB_EXTENSION_DIRECTORY="$DUCKDB_EXTENSION_DIRECTORY"
+          "$DUCKDB" :memory: -batch -echo -c "LOAD quack; SELECT 1;"
           ./scripts/ci_headscale_e2e.sh
 
       - name: Stop Headscale

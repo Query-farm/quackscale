@@ -56,6 +56,9 @@ echo "Using DuckDB: $DUCKDB"
 echo "E2e work directory: $WORK"
 echo "E2e: Quack on loopback + tailscale_serve_local → tailnet ATTACH"
 
+export DUCKDB_EXTENSION_DIRECTORY="${DUCKDB_EXTENSION_DIRECTORY:-$WORK/duckdb_extensions}"
+quacktail_ci_verify_duckdb_quack "$DUCKDB"
+
 quacktail_ci_build_image "$ROOT"
 
 mkdir -p "$HS_DATA" "$SERVER_STATE" "$CLIENT_STATE"
