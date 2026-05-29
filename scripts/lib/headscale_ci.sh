@@ -193,14 +193,16 @@ PY
 headscale_ci_verify_tailscale_client() {
   local authkey="${1:?authkey required}"
   local hostname="${2:-headscale-ci-smoke}"
-  local state_dir
+  local state_dir container attempt rc=1
   state_dir="$(mktemp -d)"
+  container="tailscale-verify-$$"
 
   echo "Verifying Headscale with Tailscale client ($TAILSCALE_IMAGE) ..."
   docker pull -q "$TAILSCALE_IMAGE" >/dev/null
 
-  set +e
-  docker run --rm \
+  docker rm -f "$container" >/dev/null 2>&1 || true
+  # Use the image entrypoint (tailscaled + tailscale up); do not override with `tailscale status`.
+  docker run -d --name "$container" \
     --cap-add=NET_ADMIN \
     --device=/dev/net/tun \
     --network=host \
@@ -208,16 +210,35 @@ headscale_ci_verify_tailscale_client() {
     -e TS_AUTHKEY="$authkey" \
     -e TS_STATE_DIR=/var/lib/tailscale \
     -e "TS_EXTRA_ARGS=--login-server=${HEADSCALE_CONTROL_URL} --hostname=${hostname} --reset --accept-routes" \
-    "$TAILSCALE_IMAGE" \
-    tailscale status
-  local rc=$?
+    "$TAILSCALE_IMAGE" >/dev/null
+
+  set +e
+  for attempt in $(seq 1 30); do
+    if docker exec "$container" tailscale status 2>/dev/null; then
+      rc=0
+      break
+    fi
+    if (( attempt % 5 == 0 )); then
+      echo "  waiting for Tailscale client (attempt $attempt) ..."
+      docker logs "$container" 2>&1 | tail -5 || true
+    fi
+    sleep 2
+  done
   set -e
+
+  if (( rc != 0 )); then
+    echo "error: Tailscale client could not join Headscale" >&2
+    echo "::group::Tailscale client logs"
+    docker logs "$container" 2>&1 | tail -50 || true
+    echo "::endgroup::"
+    headscale_ci_logs
+    headscale_ci_exec headscale nodes list >&2 || true
+  fi
+
+  docker rm -f "$container" >/dev/null 2>&1 || true
   rm -rf "$state_dir"
 
   if (( rc != 0 )); then
-    echo "error: Tailscale client could not join Headscale (exit $rc)" >&2
-    headscale_ci_logs
-    headscale_ci_exec headscale nodes list >&2 || true
     return 1
   fi
 
