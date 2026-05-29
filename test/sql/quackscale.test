@@ -1,0 +1,33 @@
+# name: test/sql/quackscale.test
+# description: QuackScale extension smoke tests (no live tailnet required)
+# group: [sql]
+
+statement error
+CALL tailscale_status();
+----
+Catalog Error: Table Function with name tailscale_status does not exist!
+
+require quackscale
+
+query IIII
+CALL tailscale_status();
+----
+true	false	NULL	[]
+
+statement ok
+CALL quack_discover();
+
+query IIIIII
+CALL tailscale_login_status();
+----
+idle	NULL	NULL	false	NULL	[]
+
+statement error
+SELECT quack_uri();
+----
+Tailscale is not up
+
+statement error
+SELECT quack_token();
+----
+quack_token(): set QUACK_TAILNET_TOKEN

@@ -1,0 +1,299 @@
+#define DUCKDB_EXTENSION_MAIN
+
+#include "quackscale_extension.hpp"
+#include "quackscale_defaults.hpp"
+#include "tailscale_bridge.hpp"
+
+#include "duckdb.hpp"
+#include "duckdb/common/exception.hpp"
+#include "duckdb/function/scalar_function.hpp"
+#include "duckdb/function/table_function.hpp"
+#include "duckdb/parser/parsed_data/create_scalar_function_info.hpp"
+
+#include <cstdlib>
+#include <cstring>
+
+namespace duckdb {
+
+namespace {
+
+static TailscaleAuthConfig ParseAuthConfig(TableFunctionBindInput &input) {
+	TailscaleAuthConfig config;
+	if (!input.inputs.empty() && !input.inputs[0].IsNull()) {
+		config.hostname = input.inputs[0].GetValue<string>();
+	}
+	auto hostname_it = input.named_parameters.find("hostname");
+	if (hostname_it != input.named_parameters.end()) {
+		config.hostname = hostname_it->second.GetValue<string>();
+	}
+	auto authkey_it = input.named_parameters.find("authkey");
+	if (authkey_it != input.named_parameters.end()) {
+		config.authkey = authkey_it->second.GetValue<string>();
+	}
+	auto control_url_it = input.named_parameters.find("control_url");
+	if (control_url_it != input.named_parameters.end()) {
+		config.control_url = control_url_it->second.GetValue<string>();
+	}
+	auto state_dir_it = input.named_parameters.find("state_dir");
+	if (state_dir_it != input.named_parameters.end()) {
+		config.state_dir = state_dir_it->second.GetValue<string>();
+	}
+	auto ephemeral_it = input.named_parameters.find("ephemeral");
+	if (ephemeral_it != input.named_parameters.end()) {
+		config.ephemeral = ephemeral_it->second.GetValue<bool>();
+	}
+	return config;
+}
+
+static void RegisterAuthParameters(TableFunction &function) {
+	function.named_parameters["hostname"] = LogicalType::VARCHAR;
+	function.named_parameters["authkey"] = LogicalType::VARCHAR;
+	function.named_parameters["control_url"] = LogicalType::VARCHAR;
+	function.named_parameters["state_dir"] = LogicalType::VARCHAR;
+	function.named_parameters["ephemeral"] = LogicalType::BOOLEAN;
+}
+
+struct QuackscaleUpBindData : public TableFunctionData {
+	TailscaleAuthConfig config;
+	bool finished = false;
+};
+
+static unique_ptr<FunctionData> QuackscaleUpBind(ClientContext &context, TableFunctionBindInput &input,
+                                                 vector<LogicalType> &return_types, vector<string> &names) {
+	auto bind = make_uniq<QuackscaleUpBindData>();
+	bind->config = ParseAuthConfig(input);
+
+	return_types = {LogicalType::BOOLEAN, LogicalType::VARCHAR, LogicalType::LIST(LogicalType::VARCHAR)};
+	names = {"running", "hostname", "tailnet_ips"};
+	return std::move(bind);
+}
+
+static void QuackscaleUpFunction(ClientContext &context, TableFunctionInput &data_p, DataChunk &output) {
+	auto &bind = data_p.bind_data->CastNoConst<QuackscaleUpBindData>();
+	if (bind.finished) {
+		return;
+	}
+
+	auto &bridge = TailscaleBridge::Get();
+	bridge.Up(bind.config);
+	auto status = bridge.Status();
+
+	output.SetCardinality(1);
+	output.SetValue(0, 0, Value::BOOLEAN(status.running));
+	output.SetValue(1, 0, status.hostname.empty() ? Value() : Value(status.hostname));
+
+	vector<Value> ip_values;
+	ip_values.reserve(status.ips.size());
+	for (auto &ip : status.ips) {
+		ip_values.emplace_back(ip);
+	}
+	output.SetValue(2, 0, Value::LIST(LogicalType::VARCHAR, std::move(ip_values)));
+
+	bind.finished = true;
+}
+
+struct QuackscaleStatusBindData : public TableFunctionData {
+	bool finished = false;
+};
+
+static unique_ptr<FunctionData> QuackscaleStatusBind(ClientContext &context, TableFunctionBindInput &input,
+                                                       vector<LogicalType> &return_types, vector<string> &names) {
+	return_types = {LogicalType::BOOLEAN, LogicalType::BOOLEAN, LogicalType::VARCHAR,
+	                  LogicalType::LIST(LogicalType::VARCHAR)};
+	names = {"libtailscale_linked", "running", "hostname", "tailnet_ips"};
+	return make_uniq<QuackscaleStatusBindData>();
+}
+
+static void QuackscaleStatusFunction(ClientContext &context, TableFunctionInput &data_p, DataChunk &output) {
+	auto &bind = data_p.bind_data->CastNoConst<QuackscaleStatusBindData>();
+	if (bind.finished) {
+		return;
+	}
+
+	auto status = TailscaleBridge::Get().Status();
+	output.SetCardinality(1);
+	output.SetValue(0, 0, Value::BOOLEAN(status.linked));
+	output.SetValue(1, 0, Value::BOOLEAN(status.running));
+	output.SetValue(2, 0, status.hostname.empty() ? Value() : Value(status.hostname));
+
+	vector<Value> ip_values;
+	ip_values.reserve(status.ips.size());
+	for (auto &ip : status.ips) {
+		ip_values.emplace_back(ip);
+	}
+	output.SetValue(3, 0, Value::LIST(LogicalType::VARCHAR, std::move(ip_values)));
+	bind.finished = true;
+}
+
+static void QuackscaleQuackUriFunction(DataChunk &args, ExpressionState &state, Vector &result) {
+	auto uri = TailscaleBridge::Get().QuackListenURI(QUACKSCALE_DEFAULT_QUACK_PORT);
+	result.Reference(Value(uri));
+}
+
+static void QuackTokenFunction(DataChunk &args, ExpressionState &state, Vector &result) {
+	const char *token = std::getenv("QUACK_TAILNET_TOKEN");
+	if (token == nullptr || token[0] == '\0') {
+		token = std::getenv("QUACK_TOKEN");
+	}
+	if (token == nullptr || token[0] == '\0') {
+		throw InvalidInputException(
+		    "quack_token(): set QUACK_TAILNET_TOKEN or QUACK_TOKEN to the shared Quack auth token for this tailnet");
+	}
+	if (strlen(token) < 4) {
+		throw InvalidInputException("quack_token(): Quack tokens must be at least 4 characters");
+	}
+	result.Reference(Value(string(token)));
+}
+
+struct QuackscaleDiscoverBindData : public TableFunctionData {
+	idx_t port = QUACKSCALE_DEFAULT_QUACK_PORT;
+	vector<QuackDiscoveryEndpoint> endpoints;
+	idx_t offset = 0;
+};
+
+static unique_ptr<FunctionData> QuackscaleDiscoverBind(ClientContext &context, TableFunctionBindInput &input,
+                                                       vector<LogicalType> &return_types, vector<string> &names) {
+	auto bind = make_uniq<QuackscaleDiscoverBindData>();
+	auto port_it = input.named_parameters.find("port");
+	if (port_it != input.named_parameters.end()) {
+		auto port = port_it->second.GetValue<int64_t>();
+		if (port <= 0 || port > 65535) {
+			throw InvalidInputException("quack_discover port must be between 1 and 65535");
+		}
+		bind->port = NumericCast<idx_t>(port);
+	}
+	bind->endpoints = TailscaleBridge::Get().QuackDiscoveryEndpoints(bind->port);
+
+	return_types = {LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::INTEGER, LogicalType::VARCHAR};
+	names = {"listen_uri", "host", "port", "via"};
+	return std::move(bind);
+}
+
+static void QuackscaleDiscoverFunction(ClientContext &context, TableFunctionInput &data_p, DataChunk &output) {
+	auto &bind = data_p.bind_data->CastNoConst<QuackscaleDiscoverBindData>();
+	const idx_t count = MinValue<idx_t>(STANDARD_VECTOR_SIZE, bind.endpoints.size() - bind.offset);
+	if (count == 0) {
+		return;
+	}
+
+	for (idx_t i = 0; i < count; i++) {
+		auto &endpoint = bind.endpoints[bind.offset + i];
+		output.SetValue(0, i, endpoint.listen_uri);
+		output.SetValue(1, i, endpoint.host);
+		output.SetValue(2, i, Value::INTEGER(NumericCast<int32_t>(endpoint.port)));
+		output.SetValue(3, i, endpoint.via);
+	}
+	output.SetCardinality(count);
+	bind.offset += count;
+}
+
+struct QuackscaleBeginLoginBindData : public TableFunctionData {
+	TailscaleAuthConfig config;
+	bool finished = false;
+};
+
+static unique_ptr<FunctionData> QuackscaleBeginLoginBind(ClientContext &context, TableFunctionBindInput &input,
+                                                         vector<LogicalType> &return_types, vector<string> &names) {
+	auto bind = make_uniq<QuackscaleBeginLoginBindData>();
+	bind->config = ParseAuthConfig(input);
+	return_types = {LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR};
+	names = {"status", "login_url", "message"};
+	return std::move(bind);
+}
+
+static void QuackscaleBeginLoginFunction(ClientContext &context, TableFunctionInput &data_p, DataChunk &output) {
+	auto &bind = data_p.bind_data->CastNoConst<QuackscaleBeginLoginBindData>();
+	if (bind.finished) {
+		return;
+	}
+	TailscaleBridge::Get().BeginInteractiveLogin(bind.config);
+	auto login = TailscaleBridge::Get().LoginStatus();
+	output.SetCardinality(1);
+	output.SetValue(0, 0, login.status);
+	output.SetValue(1, 0, login.login_url.empty() ? Value() : Value(login.login_url));
+	output.SetValue(2, 0, login.message);
+	bind.finished = true;
+}
+
+struct QuackscaleLoginStatusBindData : public TableFunctionData {
+	bool finished = false;
+};
+
+static unique_ptr<FunctionData> QuackscaleLoginStatusBind(ClientContext &context, TableFunctionBindInput &input,
+                                                          vector<LogicalType> &return_types, vector<string> &names) {
+	return_types = {LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::BOOLEAN,
+	                  LogicalType::VARCHAR, LogicalType::LIST(LogicalType::VARCHAR)};
+	names = {"status", "login_url", "message", "running", "hostname", "tailnet_ips"};
+	return make_uniq<QuackscaleLoginStatusBindData>();
+}
+
+static void QuackscaleLoginStatusFunction(ClientContext &context, TableFunctionInput &data_p, DataChunk &output) {
+	auto &bind = data_p.bind_data->CastNoConst<QuackscaleLoginStatusBindData>();
+	if (bind.finished) {
+		return;
+	}
+	auto login = TailscaleBridge::Get().LoginStatus();
+	output.SetCardinality(1);
+	output.SetValue(0, 0, login.status);
+	output.SetValue(1, 0, login.login_url.empty() ? Value() : Value(login.login_url));
+	output.SetValue(2, 0, login.message.empty() ? Value() : Value(login.message));
+	output.SetValue(3, 0, Value::BOOLEAN(login.running));
+	output.SetValue(4, 0, login.hostname.empty() ? Value() : Value(login.hostname));
+	vector<Value> ip_values;
+	for (auto &ip : login.ips) {
+		ip_values.emplace_back(ip);
+	}
+	output.SetValue(5, 0, Value::LIST(LogicalType::VARCHAR, std::move(ip_values)));
+	bind.finished = true;
+}
+
+static void LoadInternal(ExtensionLoader &loader) {
+	TableFunction up_function("tailscale_up", {LogicalType::VARCHAR}, QuackscaleUpFunction, QuackscaleUpBind);
+	RegisterAuthParameters(up_function);
+	loader.RegisterFunction(up_function);
+
+	TableFunction login_function("tailscale_login", {LogicalType::VARCHAR}, QuackscaleBeginLoginFunction,
+	                             QuackscaleBeginLoginBind);
+	RegisterAuthParameters(login_function);
+	loader.RegisterFunction(login_function);
+
+	loader.RegisterFunction(
+	    TableFunction("tailscale_login_status", {}, QuackscaleLoginStatusFunction, QuackscaleLoginStatusBind));
+
+	loader.RegisterFunction(TableFunction("tailscale_status", {}, QuackscaleStatusFunction, QuackscaleStatusBind));
+
+	TableFunction discover_function("quack_discover", {}, QuackscaleDiscoverFunction, QuackscaleDiscoverBind);
+	discover_function.named_parameters["port"] = LogicalType::BIGINT;
+	loader.RegisterFunction(discover_function);
+
+	loader.RegisterFunction(ScalarFunction("quack_uri", {}, LogicalType::VARCHAR, QuackscaleQuackUriFunction));
+	loader.RegisterFunction(ScalarFunction("quack_token", {}, LogicalType::VARCHAR, QuackTokenFunction));
+}
+
+} // namespace
+
+void QuackscaleExtension::Load(ExtensionLoader &loader) {
+	LoadInternal(loader);
+}
+
+std::string QuackscaleExtension::Name() {
+	return "quackscale";
+}
+
+std::string QuackscaleExtension::Version() const {
+#ifdef EXT_VERSION_QUACKSCALE
+	return EXT_VERSION_QUACKSCALE;
+#else
+	return "";
+#endif
+}
+
+} // namespace duckdb
+
+extern "C" {
+
+DUCKDB_CPP_EXTENSION_ENTRY(quackscale, loader) {
+	duckdb::LoadInternal(loader);
+}
+
+}

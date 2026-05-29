@@ -1,0 +1,11 @@
+[submodule "duckdb"]
+	path = duckdb
+	url = https://github.com/duckdb/duckdb.git
+	branch = main
+[submodule "extension-ci-tools"]
+	path = extension-ci-tools
+	url = https://github.com/duckdb/extension-ci-tools.git
+	branch = main
+[submodule "third_party/libtailscale"]
+	path = third_party/libtailscale
+	url = https://github.com/tailscale/libtailscale.git

@@ -1,0 +1,29 @@
+# Optional: run libtailscale's own integration tests (tstestcontrol + tsnetctest).
+# Does not require a real Tailscale account or auth keys.
+name: libtailscale integration
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'third_party/libtailscale/**'
+      - 'src/tailscale_*.cpp'
+      - 'src/include/tailscale_*.hpp'
+      - '.github/workflows/libtailscale-integration.yml'
+
+jobs:
+  libtailscale-go-test:
+    name: libtailscale go test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Run libtailscale tests (tstestcontrol / tsnetctest)
+        working-directory: third_party/libtailscale
+        run: go test -v -count=1 ./...
