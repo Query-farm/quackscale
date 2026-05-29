@@ -64,7 +64,7 @@ quacktail_ci_wait_server() {
   local server_ip="${2:-}"
   local attempt=0
   echo "Waiting for Quack server (tailnet; port ${port}) ..."
-  while (( attempt < 60 )); do
+  while (( attempt < 10 )); do
     attempt=$((attempt + 1))
     if ! quacktail_ci_server_running; then
       echo "error: server container exited early" >&2
@@ -91,7 +91,7 @@ quacktail_ci_wait_server() {
       echo "  attempt ${attempt} ..."
       docker logs "$QUACKTAIL_SERVER_CONTAINER" 2>&1 | tail -8 || true
     fi
-    sleep 2
+    sleep 1
   done
   echo "error: Quack server did not become ready" >&2
   quacktail_ci_logs
@@ -115,7 +115,7 @@ quacktail_ci_run_client() {
   local duckdb_bin="${1:?duckdb binary path}"
   local work_dir="${2:?work directory}"
   local port="${3:-9494}"
-  local timeout_sec="${4:-${E2E_CLIENT_TIMEOUT_SEC:-120}}"
+  local timeout_sec="${4:-${E2E_CLIENT_TIMEOUT_SEC:-30}}"
 
   quacktail_ci_require_docker
   docker rm -f "$QUACKTAIL_CLIENT_CONTAINER" >/dev/null 2>&1 || true
@@ -131,7 +131,7 @@ quacktail_ci_run_client() {
     -e QUACKTAIL_WORK=/work \
     -e "QUACK_PORT=${port}" \
     -e "E2E_SERVER_IP=${E2E_SERVER_IP:?E2E_SERVER_IP must be set}" \
-    -e "E2E_CLIENT_MESH_WAIT_SEC=${E2E_CLIENT_MESH_WAIT_SEC:-20}" \
+    -e "E2E_CLIENT_MESH_WAIT_SEC=${E2E_CLIENT_MESH_WAIT_SEC:-3}" \
     -e "QUACK_TAILNET_TOKEN=${QUACK_TAILNET_TOKEN:-}" \
     "$QUACKTAIL_IMAGE"
 }

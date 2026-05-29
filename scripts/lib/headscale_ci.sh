@@ -229,7 +229,7 @@ headscale_ci_verify_tailscale_client() {
     "$TAILSCALE_IMAGE" >/dev/null
 
   set +e
-  for attempt in $(seq 1 30); do
+  for attempt in $(seq 1 10); do
     echo "--- tailscale status (attempt $attempt) ---"
     if docker exec "$container" tailscale status; then
       rc=0
@@ -269,14 +269,14 @@ headscale_ci_verify_tailscale_client() {
 
 headscale_ci_node_ipv4() {
   local hostname="${1:?node hostname}"
-  local max_attempts="${2:-${HEADSCALE_NODE_WAIT_ATTEMPTS:-90}}"
+  local max_attempts="${2:-${HEADSCALE_NODE_WAIT_ATTEMPTS:-10}}"
   local attempt=0
   while (( attempt < max_attempts )); do
     attempt=$((attempt + 1))
     local nodes_json ip
     nodes_json="$(headscale_ci_exec headscale nodes list -o json 2>/dev/null || true)"
     if [[ -z "$nodes_json" || "$nodes_json" == "null" ]]; then
-      sleep 2
+      sleep 1
       continue
     fi
     ip="$(
