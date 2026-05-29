@@ -82,7 +82,7 @@ wait_for_server_quack() {
     echo "warn: could not resolve ${SERVER_HOST} tailnet IP for Quack readiness gate" >&2
     return 0
   fi
-  quacktail_wait_quack_endpoint "$server_ip" "$PORT" "${QUACK_TAILNET_TOKEN:-}" "server Quack"
+  quacktail_wait_quack_endpoint "$server_ip" "$PORT" "${QUACK_TAILNET_TOKEN:-}" "${SERVER_HOST} Quack"
 }
 
 run_server() {
@@ -121,31 +121,13 @@ run_client_verbose() {
     -init "${WORK}/client_init.sql" -batch -echo
 }
 
-print_duckdb_tables() {
-  local out="${1:?output file}"
-  awk '
-    /^┌/ {
-      if (table != "") {
-        printf "%s", table
-      }
-      table = $0 ORS
-      in_table = 1
-      next
-    }
-    in_table {
-      table = table $0 ORS
-      if (/^└/) {
-        printf "%s", table
-        table = ""
-        in_table = 0
-      }
-    }
-    END {
-      if (table != "") {
-        printf "%s", table
-      }
-    }
-  ' "$out"
+# Drop DuckDB -init banner and libtailscale stderr noise in quiet demo mode.
+quacktail_filter_demo_stream() {
+  if [[ "${QUACKTAIL_QUIET:-0}" != "1" ]]; then
+    cat
+    return
+  fi
+  grep -v -E '^-- Loading resources from |^20[0-9]{2}/[0-9]{2}/[0-9]{2} '
 }
 
 ensure_client_demo_sql() {
@@ -180,13 +162,16 @@ run_client_demo() {
   echo "→ join tailnet as ${CLIENT_HOST}, discover, ATTACH ${attach_uri} ..."
   echo ""
 
-  # One DuckDB session (same as CI verbose client): -init tailscale_up, then demo SQL on stdin.
-  # tee keeps tsnet/libtailscale lines visible while the run is in progress.
+  local client_init="${WORK}/client_init.sql"
+  local combined_sql="${WORK}/client_session.sql"
+  cat "$client_init" "$demo_sql" >"$combined_sql"
+
+  # One DuckDB session: tailscale_up + discover + ATTACH + DML (same session keeps tsnet up).
   set +o pipefail
   timeout "$demo_timeout" bash -c '
-    cat "$1" | stdbuf -oL -eL "$2" -bail -batch -cmd "$3" "$4" -init "$5"
-  ' _ "$demo_sql" "$DUCKDB" "$(quacktail_sql_extension_directory)" "$client_db" "${WORK}/client_init.sql" \
-    2>&1 | tee "$out"
+    cat "$1" | stdbuf -oL -eL "$2" -bail -batch -cmd "$3" "$4"
+  ' _ "$combined_sql" "$DUCKDB" "$(quacktail_sql_extension_directory)" "$client_db" \
+    2>&1 | quacktail_filter_demo_stream | tee "$out"
   duckdb_rc=${PIPESTATUS[0]}
   set -o pipefail
 

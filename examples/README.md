@@ -42,7 +42,9 @@ Three services: `headscale`, `quacktail-server`, `quacktail-client` (test profil
 ✓ Demo passed — two-node QuackTail cluster is working
 ```
 
-That table confirms: tailnet join, `quack_query`, `ATTACH`, read from server, write from client.
+That table confirms: tailnet join, `quack_discover`, `quack_query`, `ATTACH`, read from server, write from client.
+
+Re-running the client is safe: the client insert is idempotent (`WHERE NOT EXISTS`). The server clears `e2e_payload` only when the server container starts.
 
 Verbose DuckDB/SQL logging is off by default (`QUACKTAIL_QUIET=1`). Set `QUACKTAIL_QUIET=0` in compose or `.env` to debug.
 

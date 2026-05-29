@@ -54,15 +54,21 @@ quacktail_wait_quack_endpoint() {
   local label="${4:-Quack endpoint}"
   local attempts="${5:-${E2E_CROSS_NODE_GATE_ATTEMPTS:-60}}"
   local poll_sec="${6:-${E2E_CROSS_NODE_POLL_SEC:-2}}"
+  local quiet="${QUACKTAIL_QUIET:-0}"
   local i
 
-  echo "Waiting for ${label}: http://${host}:${port}/quack (up to ${attempts} attempts) ..." >&2
+  if [[ "$quiet" == "1" ]]; then
+    echo "→ waiting for ${label} ..."
+  else
+    echo "Waiting for ${label}: http://${host}:${port}/quack (up to ${attempts} attempts) ..." >&2
+  fi
   for (( i = 1; i <= attempts; i++ )); do
     if quacktail_quack_endpoint_ready "$host" "$port" "$token"; then
-      echo "ok: ${label} reachable on attempt ${i} (http://${host}:${port}/quack)" >&2
+      [[ "$quiet" == "1" ]] && echo "✓ ${label} ready"
+      [[ "$quiet" == "1" ]] || echo "ok: ${label} reachable on attempt ${i} (http://${host}:${port}/quack)" >&2
       return 0
     fi
-    echo "  [${i}/${attempts}] ${label} not ready yet" >&2
+    [[ "$quiet" == "1" ]] || echo "  [${i}/${attempts}] ${label} not ready yet" >&2
     sleep "$poll_sec"
   done
   echo "error: ${label} never became reachable: http://${host}:${port}/quack" >&2
