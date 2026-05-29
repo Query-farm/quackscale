@@ -10,6 +10,10 @@
 
 name: quacktail-demo
 
+# Headscale 0.28+ serve image is distroless (no shell). Use -debug for one-shot CLI jobs.
+x-headscale-serve: &headscale_serve headscale/headscale:0.28.0
+x-headscale-cli: &headscale_cli headscale/headscale:0.28.0-debug
+
 x-env: &env
   QUACK_PORT: "9494"
   QUACK_TAILNET_TOKEN: ${QUACK_TAILNET_TOKEN:-quackscale-demo-token}
@@ -91,7 +95,7 @@ configs:
 
 services:
   headscale:
-    image: headscale/headscale:0.28.0
+    image: *headscale_serve
     <<: *headscale_mounts
     command: serve
     ports:
@@ -107,7 +111,7 @@ services:
         aliases: [headscale]
 
   bootstrap:
-    image: headscale/headscale:0.28.0
+    image: *headscale_cli
     <<: *headscale_mounts
     depends_on:
       headscale:
@@ -119,6 +123,7 @@ services:
     environment:
       <<: *env
       WORK: /work
+      PATH: /ko-app:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
     networks: [quacktail]
     restart: "no"
     entrypoint: ["/bin/sh", "-ec"]
@@ -229,11 +234,12 @@ services:
 
   wait-tailnet:
     profiles: [test]
-    image: headscale/headscale:0.28.0
+    image: *headscale_cli
     <<: *headscale_mounts
     depends_on: [quacktail-server]
     environment:
       SERVER_HOST: quacktail-server
+      PATH: /ko-app:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
     networks: [quacktail]
     restart: "no"
     entrypoint: ["/bin/sh", "-ec"]
