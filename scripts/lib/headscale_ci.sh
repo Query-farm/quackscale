@@ -453,15 +453,15 @@ headscale_ci_quack_uri_local() {
   echo "quack:127.0.0.1"
 }
 
-# Client ATTACH URI — MagicDNS on the tailnet (Tailscale Serve exposes local Quack).
+# Client ATTACH URI — tailnet IP by default (tsnet has no accept-dns yet; MagicDNS needs E2E_QUACK_ATTACH_HOST=magicdns).
 headscale_ci_e2e_quack_attach_uri() {
   local server_ip="$1"
   local port="${2:-9494}"
   local server_host="${E2E_SERVER_HOST:-quacktail-server}"
-  if [[ "${E2E_QUACK_ATTACH_HOST:-magicdns}" == "ip" ]]; then
-    headscale_ci_quack_uri_for_ip "$server_ip" "$port"
-  else
+  if [[ "${E2E_QUACK_ATTACH_HOST:-ip}" == "magicdns" ]]; then
     headscale_ci_quack_client_uri "$server_host" "$port"
+  else
+    headscale_ci_quack_uri_for_ip "$server_ip" "$port"
   fi
 }
 

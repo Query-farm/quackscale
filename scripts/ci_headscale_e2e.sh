@@ -150,7 +150,7 @@ CLIENT_RC=${PIPESTATUS[0]}
 set -e
 
 if (( CLIENT_RC == 124 )); then
-  echo "error: client timed out after ${CLIENT_TIMEOUT}s — try E2E_QUACK_ATTACH_HOST=ip if MagicDNS fails" >&2
+  echo "error: client timed out after ${CLIENT_TIMEOUT}s" >&2
   CLIENT_RC=124
 fi
 
