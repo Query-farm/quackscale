@@ -32,6 +32,21 @@ resolve_attach_uri() {
   echo "quack:${SERVER_HOST}:${QUACK_PORT}"
 }
 
+write_server_quack_sql() {
+  # https://duckdb.org/docs/current/quack/overview — bind 0.0.0.0 for non-localhost;
+  # tsnet tailnet IPs are not bindable kernel interfaces.
+  cat >"$WORK/server_quack.sql" <<SQL
+SET extension_directory='/duckdb_extensions';
+LOAD quack;
+
+CALL quack_serve(
+    'quack:0.0.0.0:${QUACK_PORT}',
+    allow_other_hostname => true,
+    token => quack_token()
+);
+SQL
+}
+
 write_client_init_sql() {
   local authkey="${1:?authkey required}"
   cat >"$WORK/client_init.sql" <<SQL
@@ -55,6 +70,13 @@ CREATE SECRET (
     TYPE quack,
     TOKEN '${QUACK_TOKEN}',
     SCOPE '${attach_uri}'
+);
+
+FROM quack_query(
+    '${attach_uri}',
+    'SELECT 1 AS probe',
+    token => '${QUACK_TOKEN}',
+    disable_ssl => true
 );
 
 ATTACH '${attach_uri}' AS remote (
@@ -126,12 +148,19 @@ refresh_client_sql() {
 
 if [[ -f "$WORK/server_setup.sql" && -f "$WORK/authkey" ]]; then
   AUTHKEY="$(cat "$WORK/authkey")"
+  if [[ "${COMPOSE_REFRESH_SERVER_QUACK:-}" == "1" ]] \
+    || [[ ! -f "$WORK/server_quack.sql" ]] \
+    || grep -q 'quack_uri()' "$WORK/server_quack.sql" 2>/dev/null; then
+    write_server_quack_sql
+    echo "✓ server quack SQL ready — bind quack:0.0.0.0:${QUACK_PORT}"
+  fi
   if [[ "${COMPOSE_REFRESH_CLIENT_SQL:-}" == "1" ]] \
     || [[ ! -f "$WORK/client_quack.sql" ]] \
     || [[ ! -f "$WORK/client_init.sql" ]] \
     || [[ -f "$WORK/client_demo.sql" && ! -f "$WORK/client_quack.sql" ]] \
     || { [[ -f "$WORK/client_quack.sql" ]] && grep -q 'NOT EXISTS' "$WORK/client_quack.sql"; } \
-    || { [[ -f "$WORK/client_init.sql" ]] && ! grep -q "${CLIENT_STATE_DIR}" "$WORK/client_init.sql"; }; then
+    || { [[ -f "$WORK/client_init.sql" ]] && ! grep -q "${CLIENT_STATE_DIR}" "$WORK/client_init.sql"; } \
+    || { [[ -f "$WORK/client_quack.sql" ]] && ! grep -q 'quack_query' "$WORK/client_quack.sql"; }; then
     refresh_client_sql "$AUTHKEY"
     echo "✓ client SQL ready — attach ${ATTACH_URI}"
   fi
@@ -259,16 +288,7 @@ DELETE FROM e2e_payload;
 INSERT INTO e2e_payload VALUES (1, 'seed-from-server', 'server');
 SQL
 
-cat >"$WORK/server_quack.sql" <<SQL
-SET extension_directory='/duckdb_extensions';
-LOAD quack;
-
-CALL quack_serve(
-    quack_uri(),
-    allow_other_hostname => true,
-    token => quack_token()
-);
-SQL
+write_server_quack_sql
 
 refresh_client_sql "$AUTHKEY"
 

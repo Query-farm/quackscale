@@ -138,4 +138,14 @@ docker compose --profile test down --remove-orphans -v
 
 **Server restart loop** — check `docker compose logs quacktail-server`; for libtailscale detail: `docker compose exec quacktail-server tail -50 /work/server.log`
 
+**Client times out after `CREATE SECRET Success`** — server likely still using old `quack_uri()` bind (not listenable). Restart server so it picks up `quack:0.0.0.0:9494`:
+
+```bash
+docker compose restart quacktail-server
+# wait until healthcheck passes, then re-run client
+docker compose --profile test run --rm quacktail-client
+```
+
+Or reset volumes: `docker compose down --remove-orphans -v`
+
 **`Multiple streaming scans or streaming scans + CTAS / insert`** — this is a **`quack` extension** planner limit, not QuackScale. It fires when one SQL statement both reads and writes the same attached Quack catalog (e.g. `INSERT … WHERE NOT EXISTS (SELECT … FROM remote.t)`). See [docs/QUACK_STREAMING.md](../docs/QUACK_STREAMING.md).

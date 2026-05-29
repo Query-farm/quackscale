@@ -128,11 +128,11 @@ services:
       QUACKTAIL_AUTO_BOOTSTRAP: "1"
       HEADSCALE_CONFIG: /etc/headscale/config.yaml
     healthcheck:
-      test: [CMD, test, -f, /work/authkey]
+      test: [CMD, /usr/local/bin/quacktail-server-healthcheck.sh]
       interval: 5s
-      timeout: 3s
-      retries: 60
-      start_period: 45s
+      timeout: 5s
+      retries: 24
+      start_period: 60s
     networks:
       quacktail:
         aliases: [quacktail-server]

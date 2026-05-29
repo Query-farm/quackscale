@@ -507,7 +507,7 @@ SQL
     tailnet|*)
       cat <<SQL
 CALL quack_serve(
-    quack_uri(),
+    'quack:0.0.0.0:${port}',
     allow_other_hostname => true,
     token => quack_token()
 );
@@ -575,27 +575,26 @@ headscale_ci_sql_quack_client_demo() {
 
 LOAD quack;
 
+CREATE SECRET (
+    TYPE quack,
+    TOKEN '${token}',
+    SCOPE '${secret_scope}'
+);
+
+FROM quack_query(
+    '${attach_uri}',
+    'SELECT 1 AS probe',
+    token => '${token}',
+    disable_ssl => true
+);
+
 SQL
   if headscale_ci_quack_uri_is_local "$attach_uri"; then
     cat <<SQL
-CREATE SECRET (
-    TYPE quack,
-    TOKEN '${token}',
-    SCOPE '${secret_scope}'
-);
-
-ATTACH '${attach_uri}' AS remote (
-    TYPE quack
-);
+ATTACH '${attach_uri}' AS remote (TYPE quack);
 SQL
   else
     cat <<SQL
-CREATE SECRET (
-    TYPE quack,
-    TOKEN '${token}',
-    SCOPE '${secret_scope}'
-);
-
 ATTACH '${attach_uri}' AS remote (
     TYPE quack,
     DISABLE_SSL true

@@ -103,6 +103,9 @@ ensure_server_hosts_mapping() {
 
 run_server() {
   maybe_compose_bootstrap
+  if [[ -f "${WORK}/authkey" ]] && [[ -x /usr/local/bin/quacktail-compose-bootstrap.sh ]]; then
+    COMPOSE_REFRESH_SERVER_QUACK=1 QUACKTAIL_AUTO_BOOTSTRAP=1 /usr/local/bin/quacktail-compose-bootstrap.sh
+  fi
   ensure_quack
   cat "${WORK}/server_setup.sql" "${WORK}/server_quack.sql" >"$INIT_SQL"
   if [[ "$QUIET" == "1" ]]; then

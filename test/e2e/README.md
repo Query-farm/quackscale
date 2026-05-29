@@ -4,11 +4,11 @@ Headscale stays up; **server** and **client** DuckDB containers run concurrently
 
 ## Server bind mode (default: `tailnet`)
 
-```sql
-CALL quack_serve(quack_uri(), allow_other_hostname => true, token => quack_token());
-```
+Per [Quack docs](https://duckdb.org/docs/current/quack/overview), bind **`quack:0.0.0.0:9494`** (tsnet tailnet IPs are not bindable). Clients ATTACH via hostname + `/etc/hosts` or tailnet IP with `allow_other_hostname => true` on the server.
 
-Quack listens on the tailnet address from `tailscale_up` — **not** loopback + `tailscale_serve_local` (curl can pass through Serve while Quack ATTACH still fails).
+```sql
+CALL quack_serve('quack:0.0.0.0:9494', allow_other_hostname => true, token => quack_token());
+```
 
 Legacy loopback + Serve: `E2E_QUACK_SERVE_MODE=loopback_serve`.
 

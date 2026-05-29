@@ -37,8 +37,10 @@ RUN mkdir -p /duckdb_extensions \
 
 COPY scripts/e2e/quacktail-entrypoint.sh /usr/local/bin/quacktail-entrypoint.sh
 COPY scripts/e2e/quacktail-compose-bootstrap.sh /usr/local/bin/quacktail-compose-bootstrap.sh
+COPY scripts/e2e/quacktail-server-healthcheck.sh /usr/local/bin/quacktail-server-healthcheck.sh
 COPY scripts/lib/quacktail_ext.sh /usr/local/lib/quacktail_ext.sh
-RUN chmod +x /usr/local/bin/quacktail-entrypoint.sh /usr/local/bin/quacktail-compose-bootstrap.sh
+RUN chmod +x /usr/local/bin/quacktail-entrypoint.sh /usr/local/bin/quacktail-compose-bootstrap.sh \
+    /usr/local/bin/quacktail-server-healthcheck.sh
 
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/quacktail-entrypoint.sh"]
 CMD ["server"]
