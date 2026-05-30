@@ -8,8 +8,9 @@
 4. **[HEADSCALE.md](HEADSCALE.md)** — self-hosted [Headscale](https://github.com/juanfont/headscale) (`control_url`, preauth keys)  
 5. **[QUACK_AUTH.md](QUACK_AUTH.md)** — Quack tokens for QuackTail (`QUACK_TAILNET_TOKEN`, shared secrets, auth macros)  
 6. **[DUCKLAKE_TAILNET.md](DUCKLAKE_TAILNET.md)** — DuckLake over the tailnet (compose demo, patterns B/C)  
-7. **[PLAN.md](PLAN.md)** — architecture, API roadmap, risks  
-8. **[../examples/README.md](../examples/README.md)** — Docker Compose two-node Headscale demo  
+7. **[DUCKLAKE_REMOTE_ATTACH.md](DUCKLAKE_REMOTE_ATTACH.md)** — transparent remote lake reads (`attach_ducklake`)  
+8. **[PLAN.md](PLAN.md)** — architecture, API roadmap, risks  
+9. **[../examples/README.md](../examples/README.md)** — Docker Compose two-node Headscale demo  
 
 ## QuackTail authentication at a glance
 

@@ -51,3 +51,8 @@ statement error
 SELECT quack_token();
 ----
 quack_token(): set QUACK_TAILNET_TOKEN
+
+statement error
+CALL attach_ducklake('quack:127.0.0.1:19494');
+----
+attach_ducklake requires LOAD quack

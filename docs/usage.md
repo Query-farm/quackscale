@@ -83,7 +83,8 @@ Both operational + lake on one node?
 | Pattern | Client SQL | Parquet location | Best for |
 |---------|------------|------------------|----------|
 | **A — Quack attach** | `ATTACH 'quack:host:9494' AS remote` | Server DuckDB file / memory | Shared tables, multi-writer Quack |
-| **B — quack_query lake** | `quack_query(uri, 'SELECT … FROM lake.t')` | Server-only paths | Compose demo, server-side lake |
+| **B — quack_query lake** | `quack_query(uri, 'SELECT … FROM lake.t')` | Server-only paths | Compose demo fallback |
+| **B+ — remote lake views** | `CALL attach_ducklake(...)` then `SELECT … FROM lake.t` | Server-only paths | **Preferred** when quackscale ≥ ducklake branch ([DUCKLAKE_REMOTE_ATTACH.md](DUCKLAKE_REMOTE_ATTACH.md)) |
 | **C — ducklake:quack** | `ATTACH 'ducklake:quack:host' AS lake (DATA_PATH '…')` | Shared object store or mount | Fleet of readers, [DuckDB 1.5.3 pattern](https://duckdb.org/2026/05/20/announcing-duckdb-153.html) |
 | **D — Hybrid** | B first, then A (separate statements) | Mixed | Apps + analytics on one tailnet node |
 

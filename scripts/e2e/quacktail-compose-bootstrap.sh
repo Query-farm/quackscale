@@ -171,6 +171,7 @@ write_client_session_sql() {
   local ping_sql=""
   local forward_sql=""
   local teardown_sql=""
+  local lake_attach_sql=""
   local lake_select=""
   local lake_passed_sql=""
   local lake_discover_sql=""
@@ -187,8 +188,14 @@ write_client_session_sql() {
   fi
   if [[ "$ENABLE_DUCKLAKE" == "1" ]]; then
     lake_discover_sql="SELECT 'DISCOVERED' AS status, '${attach_uri}' AS quack_uri, '${SERVER_HOST}' AS server_host;"
-    lake_select="$(compose_sql_quack_query "$attach_uri" "SELECT * FROM ${LAKE_NAME}.inventory ORDER BY item_id LIMIT 5")"
-    lake_passed_sql="$(compose_sql_quack_query "$attach_uri" "SELECT 'LAKE_PASSED' AS status, COUNT(*)::INTEGER AS inventory_rows FROM ${LAKE_NAME}.inventory")"
+    if duckdb_has_quackscale_function attach_ducklake; then
+      lake_attach_sql="CALL attach_ducklake('${attach_uri}', remote_catalog => '${LAKE_NAME}', alias => '${LAKE_NAME}', token => '${QUACK_TOKEN}', disable_ssl => true);"
+      lake_select="SELECT * FROM ${LAKE_NAME}.inventory ORDER BY item_id LIMIT 5;"
+      lake_passed_sql="SELECT 'LAKE_PASSED' AS status, COUNT(*)::INTEGER AS inventory_rows FROM ${LAKE_NAME}.inventory;"
+    else
+      lake_select="$(compose_sql_quack_query "$attach_uri" "SELECT * FROM ${LAKE_NAME}.inventory ORDER BY item_id LIMIT 5")"
+      lake_passed_sql="$(compose_sql_quack_query "$attach_uri" "SELECT 'LAKE_PASSED' AS status, COUNT(*)::INTEGER AS inventory_rows FROM ${LAKE_NAME}.inventory")"
+    fi
   fi
   cat >"$WORK/client_session.sql" <<SQL
 LOAD quackscale;
@@ -222,6 +229,7 @@ FROM quack_query(
 );
 
 ${lake_discover_sql}
+${lake_attach_sql}
 ${lake_select}
 ${lake_passed_sql}
 $(compose_sql_attach_remote "$attach_uri")
@@ -353,6 +361,9 @@ if [[ -f "$WORK/server_setup.sql" && -f "$WORK/authkey" ]]; then
          && ! duckdb_has_quackscale_function tailscale_down; } \
     || { [[ -f "$WORK/client_session.sql" ]] && ! grep -q 'CLIENT_DEMO_DONE' "$WORK/client_session.sql"; } \
     || { [[ "$ENABLE_DUCKLAKE" == "1" && -f "$WORK/client_session.sql" ]] && ! grep -q 'DISCOVERED' "$WORK/client_session.sql"; } \
+    || { [[ "$ENABLE_DUCKLAKE" == "1" && -f "$WORK/client_session.sql" ]] && grep -q 'quacktail_attach_remote_lake' "$WORK/client_session.sql"; } \
+    || { [[ "$ENABLE_DUCKLAKE" == "1" && -f "$WORK/client_session.sql" ]] && duckdb_has_quackscale_function attach_ducklake \
+         && ! grep -q 'attach_ducklake' "$WORK/client_session.sql"; } \
     || { [[ "$ENABLE_DUCKLAKE" == "1" && -f "$WORK/client_session.sql" ]] && ! grep -q "${LAKE_NAME}.inventory" "$WORK/client_session.sql"; }; then
     refresh_client_sql "$AUTHKEY"
     echo "✓ client SQL ready — attach ${ATTACH_URI}"

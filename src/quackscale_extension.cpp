@@ -2,6 +2,7 @@
 
 #include "quackscale_extension.hpp"
 #include "quackscale_defaults.hpp"
+#include "attach_ducklake.hpp"
 #include "tailscale_bridge.hpp"
 
 #include "duckdb.hpp"
@@ -526,6 +527,8 @@ static void LoadInternal(ExtensionLoader &loader) {
 
 	loader.RegisterFunction(ScalarFunction("quack_uri", {}, LogicalType::VARCHAR, QuackscaleQuackUriFunction));
 	loader.RegisterFunction(ScalarFunction("quack_token", {}, LogicalType::VARCHAR, QuackTokenFunction));
+
+	RegisterAttachDucklakeFunctions(loader);
 }
 
 } // namespace

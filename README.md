@@ -176,6 +176,7 @@ Load with `LOAD quackscale;`. Use **`CALL`** for table functions (same style as 
 | `CALL tailscale_status()` | libtailscale linked?, running, hostname, tailnet IPs |
 | `CALL tailscale_quack_forward(host => 'peer', port => 9494)` | Localhost TCP → `tailscale_dial` (preferred for Quack ATTACH; no ALL_PROXY) |
 | `CALL tailscale_down()` | Stop forwarder + close tsnet (one-shot clients — required or process hangs) |
+| `CALL attach_ducklake(uri, …)` | Create local views over a remote DuckLake catalog (server-owned Parquet) — see [DUCKLAKE_REMOTE_ATTACH.md](docs/DUCKLAKE_REMOTE_ATTACH.md) |
 | `CALL tailscale_quack_proxy()` | Legacy SOCKS + ALL_PROXY |
 | `CALL tailscale_proxy_status()` | Legacy SOCKS status |
 
