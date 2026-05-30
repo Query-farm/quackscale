@@ -21,22 +21,19 @@ RUN mkdir -p /out
 
 RUN if [ "$BUILD_FROM_SOURCE" = "1" ]; then \
       apt-get update \
-      && apt-get install -y --no-install-recommends bash ca-certificates curl git golang-go \
-         cmake ninja-build g++ make python3 \
+      && apt-get install -y --no-install-recommends bash ca-certificates curl git \
+         build-essential cmake ninja-build patch python3 \
       && rm -rf /var/lib/apt/lists/*; \
     fi
 
 WORKDIR /src
 COPY . /src/
 
+COPY scripts/e2e/docker-build-quackscale.sh /usr/local/bin/docker-build-quackscale.sh
+RUN chmod +x /usr/local/bin/docker-build-quackscale.sh
+
 RUN if [ "$BUILD_FROM_SOURCE" = "1" ]; then \
-      git submodule update --init --recursive \
-      && GEN=ninja make release \
-      && install -m755 build/release/duckdb /out/duckdb \
-      && test -f build/release/extension/quackscale/quackscale.duckdb_extension \
-      && cp -a build/release/extension/quackscale /out/quackscale-ext \
-      && git rev-parse HEAD > /out/git-rev \
-      && echo "build_from_source=1" > /out/build-info; \
+      /usr/local/bin/docker-build-quackscale.sh /out; \
     else \
       echo "build_from_source=0" > /out/build-info \
       && echo "release_tag=${QUACKTAIL_RELEASE_TAG}" >> /out/build-info; \

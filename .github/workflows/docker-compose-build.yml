@@ -1,0 +1,37 @@
+# Build examples/docker-compose images from source (catches missing apt deps like patch).
+name: Docker compose build
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/docker-compose-build.yml'
+      - 'examples/Dockerfile'
+      - 'examples/docker-compose.yml'
+      - 'scripts/e2e/docker-build-quackscale.sh'
+      - '.dockerignore'
+      - 'src/**'
+      - 'cmake/**'
+
+jobs:
+  compose-build:
+    name: docker compose build (source)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Build quacktail-server image
+        run: |
+          cd examples
+          docker compose build quacktail-server
+
+      - name: Verify image
+        run: |
+          cd examples
+          docker compose run --rm --entrypoint /usr/local/bin/quacktail-verify-image.sh quacktail-server
