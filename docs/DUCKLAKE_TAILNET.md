@@ -7,36 +7,26 @@ Goal: serve DuckLake on a QuackTail node via **Quack**, reachable on the **Heads
 | Piece | Status |
 |-------|--------|
 | Server: local DuckLake + `quack_serve` + `tailscale_serve_local` | **Done** |
-| Client: tailscale forward + `quack_query` lake probe/query | **Done** |
+| Client: `quack_query` → `lake.inventory` (before ATTACH remote) | **Done** |
 | Client `ducklake:quack:` attach (client-side `DATA_PATH`) | Documented — use when Parquet is local/shared |
 | `ducklake_discover()` / enriched `quack_discover` | TBD |
 
 ## Find + query on tailnet
 
-### 1) Find the server and its DuckLake catalog
+### 1) Find Quack servers on the tailnet
 
-On the client, **tailnet routing** finds the server; **`quack_discover()` must run locally** (do not invoke it via `quack_query` on the server — that hangs over Quack):
+Use **`tailscale_quack_forward`** (returns `quack_uri`) or **`CALL quack_discover()`** on a node that runs quackscale locally.
+
+Do **not** run `quack_query(..., 'FROM quack_discover()')` — it can deadlock when the server executes discover inside Quack's query handler (tsnet + quack lock contention). Remote discovery is TBD (`ducklake_discover()`).
 
 ```sql
 CALL tailscale_quack_forward(host => 'quacktail-server', port => 9494, local_port => 19494);
-CALL tailscale_ping(host => 'quacktail-server', port => 9494);
-
-CREATE SECRET (TYPE quack, TOKEN '…', SCOPE 'quack:127.0.0.1:19494');
-
--- Confirm the lake catalog exists on the server
-FROM quack_query(
-    'quack:127.0.0.1:19494',
-    'SELECT database_name FROM duckdb_databases() WHERE database_name = ''lake''',
-    token => '…',
-    disable_ssl => true
-);
+-- → quack_uri = quack:127.0.0.1:19494
 ```
-
-Run `FROM quack_discover()` **on the server node** (or locally to list this host's Quack URIs).
 
 ### 2) Query DuckLake tables
 
-When the server owns DuckLake metadata + Parquet (compose demo), run lake SQL **on the server** through `quack_query`:
+Run lake SQL **before** `ATTACH … AS remote` in the same session (mixing attached Quack catalog + extra `quack_query` calls can stall).
 
 ```sql
 FROM quack_query(
@@ -65,7 +55,7 @@ FROM quack_query(
 ## Constraints
 
 - **Quack streaming-scan limit** — one remote Quack read/write per SQL statement; see [QUACK_STREAMING.md](QUACK_STREAMING.md). Each `quack_query` call is one statement.
-- **Discovery** — client uses `tailscale_quack_forward` + `tailscale_ping`; probe lake with `quack_query(..., duckdb_databases())`. Do **not** `quack_query(..., 'FROM quack_discover()')`.
+- **Discovery** — use `tailscale_quack_forward` / local `quack_discover()`; not `quack_query(..., quack_discover)` (deadlocks).
 
 ## Demo
 

@@ -196,16 +196,17 @@ run_duckdb_client_session() {
   ext_cmd="$(quacktail_sql_extension_directory)"
   : >"$tsnet_log"
 
-  # Foreground pipeline (background subshell caused stdout backpressure / apparent hangs).
+  # Write directly to client.out — never pipe through grep (stdout backpressure deadlock).
   set +o pipefail
   if [[ "$QUIET" == "1" ]]; then
     "${timeout_cmd[@]}" stdbuf -oL -eL "$DUCKDB" -batch -echo \
       -cmd "$ext_cmd" -f "$session_sql" \
-      2>>"$tsnet_log" | quacktail_filter_demo_stream | tee "$out" || duckdb_rc=$?
+      >"$out" 2>>"$tsnet_log" || duckdb_rc=$?
+    cat "$out"
   else
     "${timeout_cmd[@]}" stdbuf -oL -eL "$DUCKDB" -batch -echo \
       -cmd "$ext_cmd" -f "$session_sql" \
-      2>&1 | quacktail_filter_demo_stream | tee "$out" || duckdb_rc=$?
+      2>&1 | tee "$out" || duckdb_rc=$?
   fi
   set -o pipefail
 
