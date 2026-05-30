@@ -195,13 +195,15 @@ Core Quack (`LOAD quack`): `quack_serve`, `quack_stop`, `ATTACH`, `quack_query`,
 make test
 ```
 
-SQL unit tests do not require a live tailnet or `QUACK_TAILNET_TOKEN`.
+SQL unit tests do not require a live tailnet or `QUACK_TAILNET_TOKEN`. See [test/README.md](test/README.md).
 
-### Releases and e2e
+### Integration (Headscale + QuackTail)
 
-QuackScale is not published to the DuckDB community extension repo yet. **GitHub releases** ship a linux `duckdb` binary with quackscale embedded ([`.github/workflows/Release.yml`](.github/workflows/Release.yml), triggered on **Release published**).
+- **Docker Compose demo:** [examples/README.md](examples/README.md) — two-node cluster with `tailscale_quack_forward` + Quack `ATTACH`
+- **CI e2e:** [`.github/workflows/headscale-e2e.yml`](.github/workflows/headscale-e2e.yml) (`workflow_dispatch`, release binary `v1.0.2` by default)
+- **Host helper:** `scripts/local_remote_headscale_test.sh` — join a running compose stack from host DuckDB
 
-Headscale e2e ([`.github/workflows/headscale-e2e.yml`](.github/workflows/headscale-e2e.yml)) is **manual only** — it downloads a release binary (default: `v1.0.2`) and runs [`scripts/ci_headscale_e2e.sh`](scripts/ci_headscale_e2e.sh). See [test/e2e/README.md](test/e2e/README.md).
+Details: [test/e2e/README.md](test/e2e/README.md).
 
 ## Based on
 

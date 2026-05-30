@@ -1,14 +1,31 @@
 # QuackTail Docker Compose example
 
-Two-node **Headscale + QuackTail** cluster on Linux — server and client DuckDB nodes on a shared tailnet, client `ATTACH`es the server's Quack endpoint.
-
-The image builds DuckDB + quackscale from this repo by default (`BUILD_FROM_SOURCE=1`). Set `BUILD_FROM_SOURCE=0` to use the pinned GitHub release binary (`QUACKTAIL_RELEASE_TAG`, default `v1.0.2`).
+Two-node **Headscale + QuackTail** demo on Linux: a long-lived **server** DuckDB joins the tailnet and serves Quack on port 9494; a one-shot **client** joins the same tailnet, forwards Quack HTTP through tsnet, and `ATTACH`es the remote database.
 
 **Requires:** Linux, Docker Compose v2, `/dev/net/tun`, outbound HTTPS.
 
-## Basic testing
+## Architecture
 
-**Compose (local):**
+```
+  quacktail-client                         quacktail-server
+  ─────────────────                        ──────────────────
+  CALL tailscale_up                        CALL tailscale_up
+  CALL tailscale_quack_forward ──tsnet──►  quack_serve(127.0.0.1:9494)
+       │                                   tailscale_serve_local(:9494)
+       ▼
+  ATTACH 'quack:127.0.0.1:19494'
+```
+
+Quack HTTP uses **kernel TCP**. Embedded tsnet does not route that traffic. `tailscale_quack_forward` listens on `127.0.0.1:19494` and dials `quacktail-server:9494` via `tailscale_dial` for each connection.
+
+**Two secrets (do not confuse):**
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `QUACK_TAILNET_TOKEN` | `quackscale-demo-token` | Quack HTTP auth (`CREATE SECRET`, `quack_token()`) |
+| Headscale preauth key | generated → `/work/authkey` | `CALL tailscale_up(authkey => ...)` |
+
+## Run the demo
 
 ```bash
 git pull && cd examples
@@ -17,104 +34,81 @@ docker compose up -d --force-recreate headscale quacktail-server
 docker compose --profile test run --rm quacktail-client
 ```
 
-Use `--force-recreate` on the server after script/SQL changes (otherwise the old DuckDB process keeps running without `tailscale_serve_local`).
+Use **`--force-recreate`** on the server after script or SQL changes (otherwise the old DuckDB process keeps running).
 
-Expect `✓ Demo passed — two-node QuackTail cluster is working`.
-
-**CI (GitHub Actions):** run workflow [Headscale QuackTail e2e](../../.github/workflows/headscale-e2e.yml) (`workflow_dispatch`). Same client SQL path as compose (`client_init.sql` + `client_quack.sql`, `PASSED` row).
-
-**Next:** DuckLake on server + tailnet discovery — see [docs/DUCKLAKE_TAILNET.md](../docs/DUCKLAKE_TAILNET.md).
-
-## Quick start
+**Release binary instead of source build:**
 
 ```bash
-git pull
-cd examples
-docker compose build --no-cache quacktail-server quacktail-client
-docker compose up -d headscale quacktail-server
-docker compose --profile test run --rm quacktail-client
+BUILD_FROM_SOURCE=0 docker compose build quacktail-server quacktail-client
 ```
 
-You should see one line `→ join tailnet, ATTACH quack:quacktail-server:9494, verify ...` (not two separate join/ATTACH steps). If you still see the old two-step messages, the client image was not rebuilt.
+Default `QUACKTAIL_RELEASE_TAG` is `v1.0.2` (must include `tailscale_quack_forward`).
 
-Core services: `headscale`, `quacktail-server`, `quacktail-client` (test profile). Optional `tailscale-probe` (debug profile) uses **vanilla** `tailscale/tailscale` — no DuckDB — to test ping + TCP to `quacktail-server:9494`.
+Expect:
 
-## Expected output
-
-**Server** (`docker compose logs quacktail-server`):
-
-```
-✓ Headscale authkey ready — attach URI quack:quacktail-server:9494
-→ quacktail-server: join tailnet + quack_serve(127.0.0.1:9494) + tailscale_serve_local
-  (libtailscale logs → /work/server.log)
+```text
+✓ Demo passed — two-node QuackTail cluster is working
 ```
 
-**Client** — one DuckDB session: join tailnet (loopback SOCKS proxy auto-enabled), `ATTACH` over tailnet hostname, insert + verify:
+## Expected client output
 
-```
+```text
 → waiting for quacktail-server on tailnet ...
 ✓ quacktail-server on tailnet
-✓ client SQL ready — attach quack:quacktail-server:9494
+✓ client SQL ready — attach quack:127.0.0.1:19494
 
 QuackTail cluster demo
 ======================
-→ join tailnet, tailscale_ping quacktail-server:9494, quack_query, ATTACH quack:quacktail-server:9494 ...
+→ join tailnet, tailscale_ping quacktail-server:9494, quack_query, ATTACH quack:127.0.0.1:19494 ...
 
-(tailscale_status, Success, PASSED summary — typically under 10s)
+CALL tailscale_up(...);           → running true
+CALL tailscale_quack_forward(...); → active true, quack:127.0.0.1:19494
+CALL tailscale_ping(...);         → reachable true
+FROM quack_query(...);            → probe 1
+ATTACH 'quack:127.0.0.1:19494' AS remote (TYPE quack);
+SELECT * FROM remote.e2e_payload LIMIT 5;
+SELECT 'PASSED' ...;
 
 ✓ Demo passed — two-node QuackTail cluster is working
 ```
 
-If the client step hangs or exceeds ~30s, the demo fails fast with a timeout and tails `/work/client-tsnet.log` (libtailscale detail).
+The client runs one DuckDB session (`duckdb -batch -echo -f /work/client_session.sql`). Compose waits for `quacktail-server` **healthy** (server.log shows `quack_serve` + `tailscale_serve_local`) before starting the client.
 
-That confirms: tailnet join, `ATTACH`, read from server, write from client.
+Set `QUACKTAIL_QUIET=0` to print full SQL. libtailscale detail: `/work/client-tsnet.log` (client), `/work/server.log` (server).
 
-Re-running the client is safe: insert uses `ON CONFLICT DO NOTHING`. The server clears `e2e_payload` only when the server container starts.
+## Services
 
-Verbose DuckDB/SQL logging is off by default (`QUACKTAIL_QUIET=1`). Set `QUACKTAIL_QUIET=0` in compose or `.env` to debug.
+| Service | Profile | Role |
+|---------|---------|------|
+| `headscale` | default | Control server (`http://127.0.0.1:8080` on host) |
+| `quacktail-server` | default | Long-lived DuckDB + Quack serve |
+| `quacktail-client` | `test` | One-shot e2e |
+| `tailscale-probe` | `debug` | Vanilla `tailscale/tailscale` — ping + TCP to `:9494` (no DuckDB) |
 
-Headscale control API: **`http://127.0.0.1:8080`**
+## Connect from host DuckDB
 
-## Connect from local DuckDB
+With the stack running, a host DuckDB can join the same tailnet and use the same forwarder pattern as the client container.
 
-With the stack running, join the same Headscale tailnet from a host DuckDB:
+**Option A — helper script** (repo root):
 
 ```bash
-# repo root
-eval "$(bash scripts/ci_download_release_duckdb.sh v1.0.2)"
+docker compose exec -T quacktail-server cat /work/authkey > examples/headscale/demo.authkey  # gitignored
+export HEADSCALE_CONTROL_URL=http://127.0.0.1:8080
 export QUACK_TAILNET_TOKEN=quackscale-demo-token
+bash scripts/local_remote_headscale_test.sh   # uses build/release/duckdb or release binary
+```
 
-cd examples
-AUTHKEY=$(docker compose exec -T quacktail-server cat /work/authkey)
+**Option B — manual SQL** (after `eval "$(bash scripts/ci_download_release_duckdb.sh v1.0.2)"`):
 
-STATE_DIR="${HOME}/.local/share/duckdb/quackscale-demo"
-mkdir -p "$STATE_DIR"
-
-"$DUCKDB" -batch <<SQL
-INSTALL quack FROM core;
+```sql
+LOAD quackscale;
+CALL tailscale_up(hostname => 'local-duckdb', control_url => 'http://127.0.0.1:8080',
+    authkey => '…', state_dir => '…', ephemeral => true);
+CALL tailscale_quack_forward(host => 'quacktail-server', port => 9494, local_port => 19494);
 LOAD quack;
-
-CALL tailscale_up(
-    hostname => 'local-duckdb',
-    control_url => 'http://127.0.0.1:8080',
-    authkey => '${AUTHKEY}',
-    state_dir => '${STATE_DIR}',
-    ephemeral => false
-);
-
-CREATE SECRET (
-    TYPE quack,
-    TOKEN '${QUACK_TAILNET_TOKEN}',
-    SCOPE 'quack:quacktail-server:9494'
-);
-
-ATTACH 'quack:quacktail-server:9494' AS remote (
-    TYPE quack,
-    DISABLE_SSL true
-);
-
+CREATE SECRET (TYPE quack, TOKEN 'quackscale-demo-token', SCOPE 'quack:127.0.0.1:19494');
+ATTACH 'quack:127.0.0.1:19494' AS remote (TYPE quack);
 SELECT * FROM remote.e2e_payload;
-SQL
 ```
 
 ## Environment
@@ -122,10 +116,14 @@ SQL
 | Variable | Default |
 |----------|---------|
 | `QUACK_TAILNET_TOKEN` | `quackscale-demo-token` |
-| `QUACKTAIL_QUIET` | `1` (clean demo output) |
+| `QUACK_PORT` | `9494` |
+| `QUACK_FORWARD_LOCAL_PORT` | `19494` |
+| `QUACKTAIL_QUIET` | `1` |
 | `HEADSCALE_USER` | `quackscale-demo` |
-| `GITHUB_REPO` | `quackscience/duckdb-quackscale` (build-time) |
-| `QUACKTAIL_RELEASE_TAG` | `v1.0.2` (build-time, when `BUILD_FROM_SOURCE=0`) |
+| `BUILD_FROM_SOURCE` | `1` (build-time) |
+| `QUACKTAIL_RELEASE_TAG` | `v1.0.2` (when `BUILD_FROM_SOURCE=0`) |
+
+Copy [`.env.example`](.env.example) to `.env` to override.
 
 ## Teardown
 
@@ -135,28 +133,30 @@ docker compose --profile test down --remove-orphans -v
 
 ## Troubleshooting
 
-**Is it tailnet or DuckDB?** Run the vanilla Tailscale probe while the server is up:
+**Tailnet vs DuckDB?** Run the vanilla probe while the server is up:
 
 ```bash
-docker compose build tailscale-probe
 docker compose --profile debug run --rm tailscale-probe
 ```
 
-- Probe **passes**, client **fails** → tailnet + Quack port work; issue is DuckDB tsnet or Quack `ATTACH`.
-- Probe **ping fails** → Headscale / DERP / routing — not DuckDB-specific.
-- Probe **ping OK, TCP/HTTP to :9494 fails** → `tailscale_serve_local` / `quack_serve` on the server.
+| Probe | Client | Likely cause |
+|-------|--------|--------------|
+| pass | fail | DuckDB tsnet / `tailscale_quack_forward` / Quack `ATTACH` |
+| ping fail | — | Headscale / DERP / routing |
+| ping OK, TCP :9494 fail | — | Server `quack_serve` / `tailscale_serve_local` |
 
-**Stale `bootstrap` / `wait-tailnet` containers** — old compose file; run `git pull`, then `docker compose down --remove-orphans -v` and rebuild.
-
-**Server restart loop** — check `docker compose logs quacktail-server`; for libtailscale detail: `docker compose exec quacktail-server tail -50 /work/server.log`
-
-**Client times out after `CREATE SECRET Success`** — ensure images include `tailscale_quack_forward` (release `v1.0.2+` or `BUILD_FROM_SOURCE=1`). Client should `CALL tailscale_quack_forward(...)` then `ATTACH 'quack:127.0.0.1:19494'`.
+**Client fails after `quack_query` probe succeeds** — ensure images include `tailscale_quack_forward` and client SQL uses `ATTACH 'quack:127.0.0.1:19494'` (not direct `quack:quacktail-server:9494`). Rebuild and recreate:
 
 ```bash
+docker compose build quacktail-client
 docker compose up -d --force-recreate quacktail-server
 docker compose --profile test run --rm quacktail-client
 ```
 
-Readiness uses **only DuckDB** (`tailscale_ping`, `quack_query`) — no curl gates. Client retries the full session until `PASSED`.
+**Stale `/work` volume** — reset: `docker compose down --remove-orphans -v`
 
-**`Multiple streaming scans or streaming scans + CTAS / insert`** — this is a **`quack` extension** planner limit, not QuackScale. It fires when one SQL statement both reads and writes the same attached Quack catalog (e.g. `INSERT … WHERE NOT EXISTS (SELECT … FROM remote.t)`). See [docs/QUACK_STREAMING.md](../docs/QUACK_STREAMING.md).
+**Server logs:** `docker compose exec quacktail-server tail -50 /work/server.log`
+
+**Client logs:** `docker compose exec quacktail-server cat /work/client.out` (last run, shared volume)
+
+See also [docs/AUTHENTICATION.md](../docs/AUTHENTICATION.md) (Tailscale + forwarder) and [docs/QUACK_AUTH.md](../docs/QUACK_AUTH.md) (Quack tokens).
