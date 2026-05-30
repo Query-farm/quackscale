@@ -13,23 +13,22 @@ LOAD quackscale;  -- tailscale_up, quack_uri, quack_token, ...
 
 ## Documentation
 
-| Doc | Contents |
-|-----|----------|
-| [docs/usage.md](docs/usage.md) | **Use cases** — Quack, DuckLake, S3, discovery, production patterns |
-| [docs/PLAN.md](docs/PLAN.md) | Architecture, roadmap, risks |
-| [docs/AUTHENTICATION.md](docs/AUTHENTICATION.md) | **Tailscale** — auth keys, browser login, `TS_AUTHKEY` |
-| [docs/HEADSCALE.md](docs/HEADSCALE.md) | **Headscale** — self-hosted control plane (`control_url`, preauth keys) |
-| [docs/QUACK_AUTH.md](docs/QUACK_AUTH.md) | **Quack** — shared tokens, env provisioning, overriding `quack_authentication_function` |
+| Doc | Audience | Contents |
+|-----|----------|----------|
+| [docs/GUIDE.md](docs/GUIDE.md) | **Integrators** | Use cases, patterns, DuckLake, demos, limitations |
+| [docs/AUTHENTICATION.md](docs/AUTHENTICATION.md) | **Integrators** | Tailscale, Headscale, Quack tokens |
+| [docs/README.md](docs/README.md) | Everyone | Documentation index |
+| [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Contributors | Build, CI, roadmap |
+| [examples/README.md](examples/README.md) | Integrators | Docker Compose two-node demo |
 
 ## Authentication (two layers)
 
-QuackTail uses **two separate** credential systems. Both are required in production unless you deliberately relax Quack auth on a locked-down tailnet.
+QuackTail uses **two separate** credential systems. See [docs/AUTHENTICATION.md](docs/AUTHENTICATION.md).
 
-| Layer | Question | Provisioned via | QuackScale / Quack |
-|-------|----------|-----------------|-------------------|
-| **Tailscale** | Is this process on our tailnet? | `TS_AUTHKEY`, `CALL tailscale_up`, or browser login | `tailscale_*` SQL — [AUTHENTICATION.md](docs/AUTHENTICATION.md) |
-| **Headscale** (optional) | Same, self-hosted control server | `control_url` + Headscale preauth key | Same SQL — [HEADSCALE.md](docs/HEADSCALE.md) |
-| **Quack** | May this caller run SQL on this server? | Shared env token, DuckDB secrets, or custom auth macro | `quack_token()`, `quack_serve(token => ...)`, `CREATE SECRET` — see [QUACK_AUTH.md](docs/QUACK_AUTH.md) |
+| Layer | Question | Provisioned via |
+|-------|----------|-----------------|
+| **Tailnet** | Is this process on our mesh? | `TS_AUTHKEY`, Headscale preauth key, or browser login |
+| **Quack** | May this caller run SQL on this server? | `QUACK_TAILNET_TOKEN`, `CREATE SECRET`, or auth macro |
 
 **Do not** copy the random `auth_token` column from each `CALL quack_serve` by hand. For a fleet of servers and clients, use a **network-wide shared token** (or allowlist) as described in [Quack security — Overriding authentication](https://duckdb.org/docs/current/quack/security#overriding-authentication).
 
@@ -125,7 +124,7 @@ ATTACH 'quack:my-duckdb-node:9494' AS remote (
 FROM remote.query('SELECT 42');
 ```
 
-Use the hostname from `tailscale_up(hostname => ...)` and Quack’s default port **9494**. Details and multi-token setups: [docs/QUACK_AUTH.md](docs/QUACK_AUTH.md).
+Use the hostname from `tailscale_up(hostname => ...)` and Quack’s default port **9494**. Details: [docs/AUTHENTICATION.md](docs/AUTHENTICATION.md).
 
 ### Tailscale login (first-time / laptop)
 
@@ -160,7 +159,7 @@ Example: [examples/headscale_quacktail.sql](examples/headscale_quacktail.sql). C
 | **Multi-token allowlist** | Teams, rotation, multiple clients | `SET GLOBAL quack_authentication_function = '...'` + token table — [Quack docs](https://duckdb.org/docs/current/quack/security#example-multi-token-table) |
 | **Developer mode** | Lab tailnet only | Auth macro always `true` — [Quack docs](https://duckdb.org/docs/current/quack/security#example-developer-mode-always-allow) |
 
-Full walkthrough: [docs/QUACK_AUTH.md](docs/QUACK_AUTH.md).
+Full walkthrough: [docs/AUTHENTICATION.md](docs/AUTHENTICATION.md).
 
 ## SQL reference
 
@@ -176,7 +175,7 @@ Load with `LOAD quackscale;`. Use **`CALL`** for table functions (same style as 
 | `CALL tailscale_status()` | libtailscale linked?, running, hostname, tailnet IPs |
 | `CALL tailscale_quack_forward(host => 'peer', port => 9494)` | Localhost TCP → `tailscale_dial` (preferred for Quack ATTACH; no ALL_PROXY) |
 | `CALL tailscale_down()` | Stop forwarder + close tsnet (one-shot clients — required or process hangs) |
-| `CALL attach_ducklake(uri, …)` | Create local views over a remote DuckLake catalog (server-owned Parquet) — see [DUCKLAKE_REMOTE_ATTACH.md](docs/DUCKLAKE_REMOTE_ATTACH.md) |
+| `CALL attach_ducklake(uri, …)` | Create local views over a remote DuckLake catalog (server-owned Parquet) — see [docs/GUIDE.md](docs/GUIDE.md) |
 | `CALL tailscale_quack_proxy()` | Legacy SOCKS + ALL_PROXY |
 | `CALL tailscale_proxy_status()` | Legacy SOCKS status |
 

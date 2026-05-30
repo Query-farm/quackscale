@@ -2,7 +2,7 @@
 
 Two-node **Headscale + QuackTail** demo on Linux: server joins the tailnet and serves Quack; client `ATTACH`es via `tailscale_quack_forward`.
 
-**DuckLake combo (branch `ducklake`):** [ducklake/README.md](ducklake/README.md)
+**Integration guide:** [docs/GUIDE.md](../docs/GUIDE.md) · **DuckLake demo:** [ducklake/README.md](ducklake/README.md)
 
 **Requires:** Linux, Docker Compose v2, `/dev/net/tun`, outbound HTTPS.
 
@@ -178,4 +178,4 @@ docker compose --profile test run --rm quacktail-client
 
 **Client logs:** `docker compose exec quacktail-server cat /work/client.out` (last run, shared volume)
 
-See also [docs/AUTHENTICATION.md](../docs/AUTHENTICATION.md) (Tailscale + forwarder) and [docs/QUACK_AUTH.md](../docs/QUACK_AUTH.md) (Quack tokens).
+See also [docs/GUIDE.md](../docs/GUIDE.md) (integration patterns) and [docs/AUTHENTICATION.md](../docs/AUTHENTICATION.md) (credentials).
