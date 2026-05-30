@@ -1,6 +1,8 @@
 # QuackTail Docker Compose example
 
-Two-node **Headscale + QuackTail** demo on Linux: a long-lived **server** DuckDB joins the tailnet and serves Quack on port 9494; a one-shot **client** joins the same tailnet, forwards Quack HTTP through tsnet, and `ATTACH`es the remote database.
+Two-node **Headscale + QuackTail** demo on Linux: server joins the tailnet and serves Quack; client `ATTACH`es via `tailscale_quack_forward`.
+
+**Integration guide:** [docs/GUIDE.md](../docs/GUIDE.md) · **DuckLake demo:** [ducklake/README.md](ducklake/README.md)
 
 **Requires:** Linux, Docker Compose v2, `/dev/net/tun`, outbound HTTPS.
 
@@ -27,14 +29,28 @@ Quack HTTP uses **kernel TCP**. Embedded tsnet does not route that traffic. `tai
 
 ## Run the demo
 
+Source build is required for the DuckLake demo (`attach_ducklake`, `tailscale_down`).
+
 ```bash
-git pull && cd examples
-docker compose build quacktail-server quacktail-client
+git pull
+git submodule update --init --recursive
+cd examples
+docker compose build --no-cache quacktail-server quacktail-client
+docker compose run --rm --entrypoint /usr/local/bin/quacktail-verify-image.sh quacktail-client
 docker compose up -d --force-recreate headscale quacktail-server
 docker compose --profile test run --rm quacktail-client
 ```
 
 Use **`--force-recreate`** on the server after script or SQL changes (otherwise the old DuckDB process keeps running).
+
+**Refresh stale `/work` SQL without running the client demo** (one container, no DuckDB session):
+
+```bash
+docker compose run --rm -e QUACKTAIL_ROLE=bootstrap quacktail-client
+docker compose --profile test run --rm quacktail-client
+```
+
+Do **not** use `quacktail-client true` — compose sets `QUACKTAIL_ROLE=client`, so that still runs the full demo.
 
 **Release binary instead of source build:**
 
@@ -55,26 +71,29 @@ Expect:
 ```text
 → waiting for quacktail-server on tailnet ...
 ✓ quacktail-server on tailnet
-✓ client SQL ready — attach quack:127.0.0.1:19494
 
 QuackTail cluster demo
 ======================
-→ join tailnet, tailscale_ping quacktail-server:9494, quack_query, ATTACH quack:127.0.0.1:19494 ...
+→ join tailnet, forward, attach_ducklake, ATTACH quack:127.0.0.1:19494 ...
 
-CALL tailscale_up(...);           → running true
-CALL tailscale_quack_forward(...); → active true, quack:127.0.0.1:19494
-CALL tailscale_ping(...);         → reachable true
-FROM quack_query(...);            → probe 1
+CALL tailscale_up(...);              → running true
+CALL tailscale_quack_forward(...);  → quack:127.0.0.1:19494
+CALL tailscale_ping(...);            → reachable true
+FROM quack_query(...);               → probe 1
+CALL attach_ducklake(...);           → lake.inventory view created
+SELECT * FROM lake.inventory ...;
+SELECT 'LAKE_PASSED' ...;
 ATTACH 'quack:127.0.0.1:19494' AS remote (TYPE quack);
-SELECT * FROM remote.e2e_payload LIMIT 5;
 SELECT 'PASSED' ...;
+SELECT 'CLIENT_DEMO_DONE' ...;
+CALL tailscale_down();
 
-✓ Demo passed — two-node QuackTail cluster is working
+✓ Demo passed — QuackTail cluster + DuckLake over tailnet
 ```
 
 The client runs one DuckDB session (`duckdb -batch -echo -f /work/client_session.sql`). Compose waits for `quacktail-server` **healthy** (server.log shows `quack_serve` + `tailscale_serve_local`) before starting the client.
 
-Set `QUACKTAIL_QUIET=0` to print full SQL. libtailscale detail: `/work/client-tsnet.log` (client), `/work/server.log` (server).
+Set `QUACKTAIL_QUIET=0` to print full SQL. Server libtailscale logs: `/work/server.log`.
 
 ## Services
 
@@ -159,4 +178,4 @@ docker compose --profile test run --rm quacktail-client
 
 **Client logs:** `docker compose exec quacktail-server cat /work/client.out` (last run, shared volume)
 
-See also [docs/AUTHENTICATION.md](../docs/AUTHENTICATION.md) (Tailscale + forwarder) and [docs/QUACK_AUTH.md](../docs/QUACK_AUTH.md) (Quack tokens).
+See also [docs/GUIDE.md](../docs/GUIDE.md) (integration patterns) and [docs/AUTHENTICATION.md](../docs/AUTHENTICATION.md) (credentials).

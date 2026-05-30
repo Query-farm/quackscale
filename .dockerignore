@@ -1,0 +1,12 @@
+# Host build outputs — never send macOS/other host artifacts into Linux builds.
+/build/
+build/
+**/build/
+.cache/
+**/.cache/
+.e2e-work/
+examples/.e2e-work/
+
+# Editor / OS noise
+**/.DS_Store
+**/*~

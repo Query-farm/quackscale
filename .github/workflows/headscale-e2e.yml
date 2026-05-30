@@ -1,4 +1,4 @@
-# QuackTail e2e over Headscale — one job, Headscale service + concurrent DuckDB workers.
+# QuackTail e2e over Headscale — manual only; uses GitHub release binaries (no source build).
 name: Headscale QuackTail e2e
 
 on:
@@ -22,7 +22,7 @@ env:
 
 jobs:
   quacktail-e2e:
-    name: QuackTail e2e (Headscale + server + client)
+    name: QuackTail e2e (release binary + Headscale)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:

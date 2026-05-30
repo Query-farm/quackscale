@@ -19,8 +19,8 @@ x-env: &env
   QUACK_FORWARD_LOCAL_PORT: "19494"
   QUACK_TAILNET_TOKEN: ${QUACK_TAILNET_TOKEN:-quackscale-demo-token}
   QUACKTAIL_QUIET: "1"
-  QUACKTAIL_DEMO_TIMEOUT_SEC: "90"
-  QUACKTAIL_CLIENT_ATTEMPTS: "15"
+  QUACKTAIL_DEMO_TIMEOUT_SEC: "60"
+  QUACKTAIL_CLIENT_ATTEMPTS: "3"
   QUACKTAIL_CLIENT_POLL_SEC: "2"
   QUACKTAIL_WAIT_ATTEMPTS: "15"
   QUACKTAIL_WAIT_POLL_SEC: "1"
@@ -29,6 +29,11 @@ x-env: &env
   SERVER_HOST: quacktail-server
   CLIENT_HOST: quacktail-client
   DUCKDB_EXTENSION_DIRECTORY: /duckdb_extensions
+  QUACKTAIL_ENABLE_DUCKLAKE: ${QUACKTAIL_ENABLE_DUCKLAKE:-1}
+  QUACKTAIL_REQUIRE_ATTACH_DUCKLAKE: ${QUACKTAIL_REQUIRE_ATTACH_DUCKLAKE:-1}
+  QUACKTAIL_LAKE_NAME: ${QUACKTAIL_LAKE_NAME:-lake}
+  QUACKTAIL_LAKE_METADATA: ${QUACKTAIL_LAKE_METADATA:-/var/lib/ducklake/metadata/inventory.ducklake}
+  QUACKTAIL_LAKE_DATA_PATH: ${QUACKTAIL_LAKE_DATA_PATH:-/var/lib/ducklake/data}
 
 x-headscale-volumes: &headscale_volumes
   configs:
@@ -48,6 +53,7 @@ x-quacktail: &quacktail
       BUILD_FROM_SOURCE: ${BUILD_FROM_SOURCE:-1}
       GITHUB_REPO: ${GITHUB_REPO:-quackscience/duckdb-quackscale}
       QUACKTAIL_RELEASE_TAG: ${QUACKTAIL_RELEASE_TAG:-v1.0.2}
+    # DuckLake demo needs attach_ducklake — do not set BUILD_FROM_SOURCE=0 until a release includes it.
   cap_add: [NET_ADMIN]
   devices: [/dev/net/tun]
   <<: *headscale_volumes
@@ -131,11 +137,17 @@ services:
     depends_on:
       headscale:
         condition: service_healthy
+    volumes:
+      - quacktail-work:/work
+      - ducklake-lake:/var/lib/ducklake
+      - headscale-data:/var/lib/headscale
+      - headscale-run:/var/run/headscale
     environment:
       <<: *env
       QUACKTAIL_WORK: /work
       QUACKTAIL_ROLE: server
       QUACKTAIL_AUTO_BOOTSTRAP: "1"
+      QUACKTAIL_MANAGE_CLIENT_SQL: "0"
       HEADSCALE_CONFIG: /etc/headscale/config.yaml
     healthcheck:
       test: [CMD, /usr/local/bin/quacktail-server-healthcheck.sh]
@@ -158,6 +170,7 @@ services:
       <<: *env
       QUACKTAIL_WORK: /work
       QUACKTAIL_ROLE: client
+      QUACKTAIL_MANAGE_CLIENT_SQL: "1"
       QUACKTAIL_WAIT_SERVER: quacktail-server
       HEADSCALE_CONFIG: /etc/headscale/config.yaml
     restart: "no"
@@ -185,6 +198,7 @@ volumes:
   headscale-data:
   headscale-run:
   quacktail-work:
+  ducklake-lake:
 
 networks:
   quacktail:

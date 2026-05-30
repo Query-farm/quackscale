@@ -12,6 +12,8 @@ on:
       - 'src/**'
       - 'cmake/**'
       - 'third_party/libtailscale/**'
+      - 'examples/Dockerfile'
+      - 'scripts/e2e/**'
 
 env:
   HEADSCALE_HOST: headscale
@@ -38,7 +40,7 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake ninja-build ccache curl
+          sudo apt-get install -y build-essential cmake ninja-build patch ccache curl
 
       - name: Start Headscale
         run: |
