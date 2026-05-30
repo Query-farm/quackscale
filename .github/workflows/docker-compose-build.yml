@@ -1,4 +1,4 @@
-# Build examples/docker-compose images from source (catches missing apt deps like patch).
+# Fast PR check: build examples images and verify quackscale functions (no full e2e).
 name: Docker compose build
 
 on:
@@ -9,15 +9,19 @@ on:
       - 'examples/Dockerfile'
       - 'examples/docker-compose.yml'
       - 'scripts/e2e/docker-build-quackscale.sh'
+      - 'scripts/e2e/quacktail-verify-image.sh'
       - '.dockerignore'
       - 'src/**'
       - 'cmake/**'
 
+env:
+  COMPOSE_PROJECT_NAME: quacktail-ci-build
+
 jobs:
   compose-build:
-    name: docker compose build (source)
+    name: docker compose build + verify
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     permissions:
       contents: read
 
@@ -26,12 +30,13 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Build quacktail-server image
+      - name: Build and verify quacktail-server image
+        working-directory: examples
         run: |
-          cd examples
-          docker compose build quacktail-server
-
-      - name: Verify image
-        run: |
-          cd examples
+          docker compose build quacktail-server quacktail-client
           docker compose run --rm --entrypoint /usr/local/bin/quacktail-verify-image.sh quacktail-server
+
+      - name: Teardown
+        if: always()
+        working-directory: examples
+        run: docker compose down --remove-orphans || true

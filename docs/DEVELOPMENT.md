@@ -70,9 +70,9 @@ When bumping the DuckDB target:
 
 | Workflow | Purpose |
 |----------|---------|
-| [headscale-integration.yml](../.github/workflows/headscale-integration.yml) | Build from source + Headscale smoke |
-| [docker-compose-build.yml](../.github/workflows/docker-compose-build.yml) | Build compose image + verify-image |
-| [headscale-e2e.yml](../.github/workflows/headscale-e2e.yml) | Two-node e2e with release binary |
+| [headscale-e2e.yml](../.github/workflows/headscale-e2e.yml) | **Full compose e2e** — build, verify-image, DuckLake + Quack demo |
+| [docker-compose-build.yml](../.github/workflows/docker-compose-build.yml) | Compose build + verify-image (PR gate) |
+| [headscale-integration.yml](../.github/workflows/headscale-integration.yml) | Source build + Headscale smoke on host |
 | [Release.yml](../.github/workflows/Release.yml) | Linux release tarball on GitHub Release |
 | [libtailscale-integration.yml](../.github/workflows/libtailscale-integration.yml) | libtailscale `go test` |
 

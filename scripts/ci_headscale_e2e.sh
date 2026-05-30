@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Two-node QuackTail e2e: Headscale + server + client DuckDB containers overlap.
-# Server stays up (-d); client starts while server is still booting; client polls then ATTACH.
+# Legacy two-node e2e: bind-mounted host duckdb + test/e2e/Dockerfile.quacktail.
+# Prefer scripts/ci_compose_e2e.sh (examples/docker-compose.yml) — same as examples/README.md.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
