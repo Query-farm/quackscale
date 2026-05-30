@@ -87,6 +87,26 @@ ATTACH 'ducklake:${attach_uri}' AS ${lake_name} (DATA_PATH '${data_path}');
 SQL
 }
 
+# Escape single quotes for SQL embedded in quack_query(..., '...').
+compose_sql_escape() {
+  printf "%s" "${1:?}" | sed "s/'/''/g"
+}
+
+compose_sql_quack_query() {
+  local attach_uri="${1:?attach uri required}"
+  local sql="${2:?sql required}"
+  local escaped
+  escaped="$(compose_sql_escape "$sql")"
+  cat <<SQL
+FROM quack_query(
+    '${attach_uri}',
+    '${escaped}',
+    token => '${QUACK_TOKEN}',
+    disable_ssl => true
+);
+SQL
+}
+
 write_server_ducklake_sql() {
   [[ "$ENABLE_DUCKLAKE" == "1" ]] || return 0
   mkdir -p "$(dirname "$LAKE_METADATA")" "$LAKE_DATA_PATH"
@@ -150,9 +170,7 @@ write_client_session_sql() {
   local attach_uri="${2:?attach uri required}"
   local ping_sql=""
   local forward_sql=""
-  local lake_load=""
   local lake_discover=""
-  local lake_attach=""
   local lake_select=""
   local lake_passed_sql=""
   if duckdb_has_quackscale_function tailscale_ping; then
@@ -164,11 +182,9 @@ write_client_session_sql() {
     forward_sql="CALL tailscale_quack_proxy();"
   fi
   if [[ "$ENABLE_DUCKLAKE" == "1" ]]; then
-    lake_load=$'LOAD ducklake;\n'
-    lake_discover=$'FROM quack_discover();\n'
-    lake_attach="$(compose_sql_attach_ducklake "$attach_uri" "$LAKE_NAME" "$LAKE_DATA_PATH")"
-    lake_select=$'SELECT * FROM '"${LAKE_NAME}"$'.inventory ORDER BY item_id LIMIT 5;\n'
-    lake_passed_sql=$'SELECT\n    '"'"'LAKE_PASSED'"'"' AS status,\n    COUNT(*)::INTEGER AS inventory_rows\nFROM '"${LAKE_NAME}"$'.inventory;\n'
+    lake_discover="$(compose_sql_quack_query "$attach_uri" "FROM quack_discover();")"
+    lake_select="$(compose_sql_quack_query "$attach_uri" "SELECT * FROM ${LAKE_NAME}.inventory ORDER BY item_id LIMIT 5")"
+    lake_passed_sql="$(compose_sql_quack_query "$attach_uri" "SELECT 'LAKE_PASSED' AS status, COUNT(*)::INTEGER AS inventory_rows FROM ${LAKE_NAME}.inventory")"
   fi
   cat >"$WORK/client_session.sql" <<SQL
 LOAD quackscale;
@@ -184,10 +200,10 @@ CALL tailscale_up(
 ${forward_sql}
 
 ${ping_sql}
-${lake_discover}
+
 SET extension_directory='/duckdb_extensions';
 LOAD quack;
-${lake_load}
+
 CREATE SECRET (
     TYPE quack,
     TOKEN '${QUACK_TOKEN}',
@@ -204,8 +220,9 @@ FROM quack_query(
 $(compose_sql_attach_remote "$attach_uri")
 
 SELECT * FROM remote.e2e_payload LIMIT 5;
-${lake_attach}
-${lake_select}${lake_passed_sql}
+${lake_discover}
+${lake_select}
+${lake_passed_sql}
 SELECT
     'PASSED' AS status,
     '${attach_uri}' AS attach_uri,
@@ -317,7 +334,7 @@ if [[ -f "$WORK/server_setup.sql" && -f "$WORK/authkey" ]]; then
     || { [[ -f "$WORK/client_session.sql" ]] && ! grep -q 'quack_query' "$WORK/client_session.sql"; } \
     || { [[ -f "$WORK/client_session.sql" ]] && grep -q 'ON CONFLICT' "$WORK/client_session.sql"; } \
     || { [[ -f "$WORK/client_session.sql" ]] && ! grep -q 'tailscale_quack_proxy' "$WORK/client_session.sql"; } \
-    || { [[ "$ENABLE_DUCKLAKE" == "1" && -f "$WORK/client_session.sql" ]] && ! grep -q "ducklake:quack:" "$WORK/client_session.sql"; }; then
+    || { [[ "$ENABLE_DUCKLAKE" == "1" && -f "$WORK/client_session.sql" ]] && ! grep -q "${LAKE_NAME}.inventory" "$WORK/client_session.sql"; }; then
     refresh_client_sql "$AUTHKEY"
     echo "✓ client SQL ready — attach ${ATTACH_URI}"
   fi

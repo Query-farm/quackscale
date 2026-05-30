@@ -1,72 +1,68 @@
 # DuckLake over QuackTail
 
-Goal: serve DuckLake on a QuackTail node via **Quack**, reachable on the **Headscale tailnet**, with discovery via `quack_discover()` and queries via the official **`ducklake:quack:`** attach pattern.
+Goal: serve DuckLake on a QuackTail node via **Quack**, reachable on the **Headscale tailnet** — **find** endpoints and **query** tables from any tailnet client.
 
 ## Status on branch `ducklake`
 
 | Piece | Status |
 |-------|--------|
-| Server: local DuckLake + `quack_serve` + `tailscale_serve_local` | **Done** (compose bootstrap) |
-| Client: `quack_discover()` + `ducklake:quack:` attach + inventory query | **Done** (compose e2e) |
+| Server: local DuckLake + `quack_serve` + `tailscale_serve_local` | **Done** |
+| Client: `quack_query` → `quack_discover()` + `lake.inventory` | **Done** |
+| Client `ducklake:quack:` attach (client-side `DATA_PATH`) | Documented — use when Parquet is local/shared |
 | `ducklake_discover()` / enriched `quack_discover` | TBD |
-| Client `DATA_PATH` on object storage (no shared volume) | TBD (use `s3://…` per DuckLake docs) |
-| CI DuckLake profile | TBD |
+
+## Find + query on tailnet
+
+### 1) Find Quack / DuckLake servers
+
+`FROM quack_discover()` on **this** node lists **local** tailnet URIs only. To discover a **remote** server's endpoints, run discover **on the server** via Quack:
+
+```sql
+CALL tailscale_quack_forward(host => 'quacktail-server', port => 9494, local_port => 19494);
+CREATE SECRET (TYPE quack, TOKEN '…', SCOPE 'quack:127.0.0.1:19494');
+
+FROM quack_query(
+    'quack:127.0.0.1:19494',
+    'FROM quack_discover()',
+    token => '…',
+    disable_ssl => true
+);
+-- → quack:quacktail-server:9494, quack:100.64.x.x:9494, …
+```
+
+### 2) Query DuckLake tables
+
+When the server owns DuckLake metadata + Parquet (compose demo), run lake SQL **on the server** through `quack_query`:
+
+```sql
+FROM quack_query(
+    'quack:127.0.0.1:19494',
+    'SELECT * FROM lake.inventory ORDER BY item_id',
+    token => '…',
+    disable_ssl => true
+);
+```
+
+**Why not `remote.lake.inventory`?** Plain `ATTACH 'quack:…' AS remote` exposes the primary catalog only — not nested attached DuckLake catalogs.
+
+**Why not `ducklake:quack:` in compose?** That pattern ([DuckDB 1.5.3](https://duckdb.org/2026/05/20/announcing-duckdb-153.html)) uses Quack as the catalog DB and requires client `DATA_PATH` to resolve Parquet. Our demo stores Parquet on the **server volume** only; `ducklake:quack:` attach can block when paths don't align. Use it when the client has a local or object-store `DATA_PATH` (`s3://…`).
 
 ## Architecture
 
 ```text
 ┌─────────────────────┐     tailnet      ┌─────────────────────┐
 │  quacktail-client   │ ◄──────────────► │  quacktail-server   │
-│  quack_discover()   │                  │  ATTACH ducklake:…  │
-│  ducklake:quack:…   │                  │  quack_serve        │
-│  + ro Parquet vol   │                  │  Parquet → ducklake-lake
-└─────────────────────┘                  └─────────────────────┘
+│  quack_query(…)     │                  │  ATTACH ducklake:…  │
+│  (find + lake SQL)  │                  │  quack_serve        │
+└─────────────────────┘                  │  ducklake-lake vol  │
+                                         └─────────────────────┘
 ```
-
-1. **Server** joins tailnet, attaches DuckLake (`lake` catalog, metadata + Parquet on `ducklake-lake`), runs `quack_serve` + `tailscale_serve_local`.
-2. **Client** joins tailnet, `CALL quack_discover()` to find Quack URIs, `tailscale_quack_forward`, then **`ATTACH 'ducklake:quack:127.0.0.1:19494' AS lake (DATA_PATH '…')`** and queries `lake.inventory`.
-
-## Why not `remote.lake.*`?
-
-`ATTACH 'quack:…' AS remote` exposes the server's **primary** DuckDB catalog only (`remote.e2e_payload` works). Nested attached databases (the server's local `lake` DuckLake catalog) are **not** visible as `remote.lake.table`.
-
-DuckDB **v1.5.3** added the supported pattern: use the remote Quack server as the DuckLake **catalog database** ([announcement](https://duckdb.org/2026/05/20/announcing-duckdb-153.html)):
-
-```sql
--- Server
-CALL quack_serve('quack:127.0.0.1:9494', token => '…');
-
--- Client
-LOAD ducklake;
-CREATE SECRET (TYPE quack, TOKEN '…', SCOPE 'quack:127.0.0.1:19494');
-ATTACH 'ducklake:quack:127.0.0.1:19494' AS lake (DATA_PATH '/var/lib/ducklake/data');
-SELECT * FROM lake.inventory;
-```
-
-Catalog metadata flows over Quack; **`DATA_PATH` must still resolve to the Parquet files** (shared volume in compose, or `s3://` / `https://` in production — see [DuckLake remote data path](https://duckdb.org/docs/stable/duckdb/guides/using_a_remote_data_path)).
-
-## Discovery
-
-| What | How |
-|------|-----|
-| Find Quack servers on tailnet | `FROM quack_discover();` (after `tailscale_up`) |
-| Connect | `tailscale_quack_forward` → `ducklake:quack:127.0.0.1:<local_port>` |
-| DuckLake-specific discovery | TBD (`ducklake_discover()` enriching `quack_discover`) |
 
 ## Constraints
 
-- **Quack streaming-scan limit** — one remote Quack read/write per SQL statement; see [QUACK_STREAMING.md](QUACK_STREAMING.md). DuckLake attach is separate from plain `quack:` attach.
-- **Parquet path** — client `DATA_PATH` must match where files live (compose: read-only mount of `ducklake-lake` at the same path as the server).
+- **Quack streaming-scan limit** — one remote Quack read/write per SQL statement; see [QUACK_STREAMING.md](QUACK_STREAMING.md). Each `quack_query` call is one statement.
+- **Discovery** — remote discover = `quack_query(..., 'FROM quack_discover()')` until `ducklake_discover()` lands.
 
 ## Demo
 
-See [examples/ducklake/README.md](../examples/ducklake/README.md).
-
-## QuackScale changes (not in core `quack`)
-
-| Piece | Owner | Notes |
-|-------|--------|------|
-| Tailnet join, `tailscale_quack_forward` | quackscale | Done |
-| Compose DuckLake server bootstrap | quackscale | Done on `ducklake` branch |
-| `ducklake_discover()` or enriched `quack_discover` | quackscale | TBD |
-| Quack multi-scan planner | duckdb-quack | Upstream |
+[examples/ducklake/README.md](../examples/ducklake/README.md)
