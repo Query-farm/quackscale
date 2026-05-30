@@ -16,6 +16,7 @@ QuackScale does **not** replace `quack` or `ducklake`. It provides the **network
 | Design a deployment (patterns, DuckLake, demos) | [docs/GUIDE.md](docs/GUIDE.md) |
 | Tailnet login, Headscale, Quack tokens | [docs/AUTHENTICATION.md](docs/AUTHENTICATION.md) |
 | Two-node proof (Docker Compose) | [examples/README.md](examples/README.md) |
+| DuckLake + tailnet demo | [examples/ducklake/README.md](examples/ducklake/README.md) |
 | Build from source, CI, roadmap | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) |
 | Full doc index | [docs/README.md](docs/README.md) |
 
@@ -167,10 +168,100 @@ ATTACH 'quack:127.0.0.1:19494' AS remote (TYPE quack, DISABLE_SSL true);
 FROM remote.query('SELECT 42');
 
 DETACH remote;
+SELECT 'CLIENT_DEMO_DONE' AS status;
 CALL tailscale_down();
 ```
 
-Full client recipe (probe, DuckLake, compose markers): **[docs/GUIDE.md](docs/GUIDE.md)**.
+### DuckLake over the tailnet
+
+Query a **server-owned** DuckLake catalog from a tailnet client. Parquet stays on the server; the client uses `attach_ducklake` to create local views that delegate to the remote lake (same path as the [compose demo](examples/README.md)).
+
+**Server** — attach DuckLake locally, then expose Quack on the mesh:
+
+```sql
+LOAD quack;
+LOAD ducklake;
+LOAD quackscale;
+
+CALL tailscale_up(
+    hostname => 'lake-server',
+    state_dir => '/var/lib/quacktail/lake-server'
+);
+
+ATTACH 'ducklake:/data/lake/metadata/inventory.ducklake' AS lake (
+    DATA_PATH '/data/lake/data/'
+);
+USE lake;
+
+CREATE TABLE IF NOT EXISTS inventory (item_id INTEGER, quantity INTEGER);
+INSERT INTO inventory VALUES (101, 50), (102, 120);
+
+CALL quack_serve(
+    'quack:127.0.0.1:9494',
+    allow_other_hostname => true,
+    token => quack_token()
+);
+CALL tailscale_serve_local(port => 9494);
+```
+
+**Client** — forward Quack over tsnet, then query `lake.inventory` like local tables:
+
+```sql
+LOAD quackscale;
+LOAD quack;
+
+CALL tailscale_up(hostname => 'lake-client', state_dir => '…', …);
+CALL tailscale_quack_forward(
+    host => 'lake-server',
+    port => 9494,
+    local_port => 19494
+);
+CALL tailscale_ping(host => 'lake-server', port => 9494);
+
+CREATE SECRET (
+    TYPE quack,
+    TOKEN 'your-shared-quack-token',
+    SCOPE 'quack:127.0.0.1:19494'
+);
+
+FROM quack_query(
+    'quack:127.0.0.1:19494',
+    'SELECT 1 AS probe',
+    token => 'your-shared-quack-token',
+    disable_ssl => true
+);
+
+CALL attach_ducklake(
+    'quack:127.0.0.1:19494',
+    remote_catalog => 'lake',
+    alias => 'lake',
+    token => 'your-shared-quack-token',
+    disable_ssl => true
+);
+
+SELECT * FROM lake.inventory ORDER BY item_id;
+SELECT 'LAKE_PASSED' AS status, COUNT(*)::INTEGER AS inventory_rows FROM lake.inventory;
+
+SELECT 'CLIENT_DEMO_DONE' AS status;
+CALL tailscale_down();
+```
+
+`attach_ducklake` requires a build that includes it (source or release **≥ v1.0.3**). Without it, use `quack_query(uri, 'SELECT … FROM lake.inventory', …)` — see [docs/GUIDE.md](docs/GUIDE.md).
+
+**Do not** use `SELECT * FROM remote.lake.inventory` — plain `ATTACH 'quack:…' AS remote` exposes the primary catalog only, not nested DuckLake databases.
+
+Run the full two-node proof (Headscale + DuckLake + Quack):
+
+```sh
+cd examples
+docker compose build quacktail-server quacktail-client
+docker compose up -d --force-recreate headscale quacktail-server
+docker compose --profile test run --rm quacktail-client
+```
+
+Expect `LAKE_PASSED`, `PASSED`, and `✓ Demo passed`.
+
+More patterns (shared S3 `DATA_PATH`, hybrid workloads): **[docs/GUIDE.md](docs/GUIDE.md)**.
 
 ---
 
