@@ -76,30 +76,6 @@ wait_for_tailnet_server() {
   return 1
 }
 
-wait_for_server_quack_ready() {
-  [[ -n "${QUACKTAIL_WAIT_SERVER:-}" ]] || return 0
-  local attempts="${QUACKTAIL_SERVER_WAIT_ATTEMPTS:-120}"
-  local poll_sec="${QUACKTAIL_SERVER_WAIT_POLL_SEC:-1}"
-  local server_log="${WORK}/server.log"
-  if [[ "$QUIET" == "1" ]]; then
-    echo "→ waiting for server quack_serve + tailscale_serve_local ..."
-  else
-    echo "Waiting for server init in ${server_log} (up to ${attempts}s) ..."
-  fi
-  local i
-  for ((i = 1; i <= attempts; i++)); do
-    if quacktail_server_log_ready "$server_log" "$PORT" "$SERVER_HOST"; then
-      [[ "$QUIET" == "1" ]] && echo "✓ server Quack endpoint ready"
-      [[ "$QUIET" == "1" ]] || echo "Server init complete (quack_serve + tailscale_serve_local)."
-      return 0
-    fi
-    sleep "$poll_sec"
-  done
-  echo "error: server not ready (quack_serve + tailscale_serve_local) after ${attempts}s" >&2
-  [[ -s "$server_log" ]] && tail -30 "$server_log" >&2 || true
-  return 1
-}
-
 resolve_server_tailnet_ip() {
   headscale_cmd nodes list 2>/dev/null | grep -F "$SERVER_HOST" | grep -oE '100\.64\.[0-9]+\.[0-9]+' | head -1 || true
 }
@@ -233,7 +209,6 @@ run_client() {
   local attempt
 
   wait_for_tailnet_server
-  wait_for_server_quack_ready
   ensure_quack
   ensure_server_hosts_mapping
   ensure_client_sql

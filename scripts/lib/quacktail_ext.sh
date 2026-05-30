@@ -83,12 +83,9 @@ quacktail_server_log_ready() {
   if grep -Fq 'QUACKTAIL_SERVER_READY' "$log" 2>/dev/null; then
     return 0
   fi
-  # Matches compose demo output when marker SQL is absent (stale /work/server_quack.sql).
-  if grep -Fq "quack:127.0.0.1:${port}" "$log" 2>/dev/null \
+  # quack_serve listen_uri + tailscale_serve_local local_forward (no box-drawing dependency).
+  grep -Fq "quack:127.0.0.1:${port}" "$log" 2>/dev/null \
     && grep -Fq 'local_forward' "$log" 2>/dev/null \
     && grep -Fq "127.0.0.1:${port}" "$log" 2>/dev/null \
-    && grep -Fq "│ true    │ ${server_host} │" "$log" 2>/dev/null; then
-    return 0
-  fi
-  return 1
+    && grep -Fq "${server_host}" "$log" 2>/dev/null
 }
