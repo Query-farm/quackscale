@@ -170,6 +170,7 @@ write_client_session_sql() {
   local attach_uri="${2:?attach uri required}"
   local ping_sql=""
   local forward_sql=""
+  local teardown_sql=""
   local lake_select=""
   local lake_passed_sql=""
   local lake_discover_sql=""
@@ -180,6 +181,9 @@ write_client_session_sql() {
     forward_sql="CALL tailscale_quack_forward(host => '${SERVER_HOST}', port => ${QUACK_PORT}, local_port => ${QUACK_FORWARD_LOCAL_PORT});"
   elif duckdb_has_quackscale_function tailscale_quack_proxy; then
     forward_sql="CALL tailscale_quack_proxy();"
+  fi
+  if duckdb_has_quackscale_function tailscale_down; then
+    teardown_sql="CALL tailscale_down();"
   fi
   if [[ "$ENABLE_DUCKLAKE" == "1" ]]; then
     lake_discover_sql="SELECT 'DISCOVERED' AS status, '${attach_uri}' AS quack_uri, '${SERVER_HOST}' AS server_host;"
@@ -233,9 +237,9 @@ FROM remote.e2e_payload;
 
 DETACH remote;
 
-SELECT 'CLIENT_DEMO_DONE' AS status;
+${teardown_sql}
 
-CALL tailscale_down();
+SELECT 'CLIENT_DEMO_DONE' AS status;
 SQL
   if grep -q '\\n' "$WORK/client_session.sql" 2>/dev/null; then
     echo "error: generated client_session.sql contains literal \\n" >&2
@@ -345,7 +349,8 @@ if [[ -f "$WORK/server_setup.sql" && -f "$WORK/authkey" ]]; then
     || { [[ -f "$WORK/client_session.sql" ]] && grep -q 'ON CONFLICT' "$WORK/client_session.sql"; } \
     || { [[ -f "$WORK/client_session.sql" ]] && ! grep -q 'tailscale_quack_forward' "$WORK/client_session.sql"; } \
     || { [[ -f "$WORK/client_session.sql" ]] && grep -q '\\n' "$WORK/client_session.sql"; } \
-    || { [[ -f "$WORK/client_session.sql" ]] && ! grep -q 'CALL tailscale_down' "$WORK/client_session.sql"; } \
+    || { [[ -f "$WORK/client_session.sql" ]] && grep -q 'CALL tailscale_down' "$WORK/client_session.sql" \
+         && ! duckdb_has_quackscale_function tailscale_down; } \
     || { [[ -f "$WORK/client_session.sql" ]] && ! grep -q 'CLIENT_DEMO_DONE' "$WORK/client_session.sql"; } \
     || { [[ "$ENABLE_DUCKLAKE" == "1" && -f "$WORK/client_session.sql" ]] && ! grep -q 'DISCOVERED' "$WORK/client_session.sql"; } \
     || { [[ "$ENABLE_DUCKLAKE" == "1" && -f "$WORK/client_session.sql" ]] && ! grep -q "${LAKE_NAME}.inventory" "$WORK/client_session.sql"; }; then

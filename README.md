@@ -15,6 +15,7 @@ LOAD quackscale;  -- tailscale_up, quack_uri, quack_token, ...
 
 | Doc | Contents |
 |-----|----------|
+| [docs/usage.md](docs/usage.md) | **Use cases** — Quack, DuckLake, S3, discovery, production patterns |
 | [docs/PLAN.md](docs/PLAN.md) | Architecture, roadmap, risks |
 | [docs/AUTHENTICATION.md](docs/AUTHENTICATION.md) | **Tailscale** — auth keys, browser login, `TS_AUTHKEY` |
 | [docs/HEADSCALE.md](docs/HEADSCALE.md) | **Headscale** — self-hosted control plane (`control_url`, preauth keys) |
@@ -174,6 +175,7 @@ Load with `LOAD quackscale;`. Use **`CALL`** for table functions (same style as 
 | `CALL tailscale_login_status()` | Poll login (`starting` / `needs_login` / `up` / `error`) |
 | `CALL tailscale_status()` | libtailscale linked?, running, hostname, tailnet IPs |
 | `CALL tailscale_quack_forward(host => 'peer', port => 9494)` | Localhost TCP → `tailscale_dial` (preferred for Quack ATTACH; no ALL_PROXY) |
+| `CALL tailscale_down()` | Stop forwarder + close tsnet (one-shot clients — required or process hangs) |
 | `CALL tailscale_quack_proxy()` | Legacy SOCKS + ALL_PROXY |
 | `CALL tailscale_proxy_status()` | Legacy SOCKS status |
 

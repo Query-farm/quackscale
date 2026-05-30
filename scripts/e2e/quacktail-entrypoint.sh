@@ -240,24 +240,22 @@ run_duckdb_client_session() {
   : >"$tsnet_log"
   : >"$out"
 
-  # Live tee + monitor: after CLIENT_DEMO_DONE, allow tailscale_down then SIGTERM/KILL if needed.
+  # Live tee + monitor: CLIENT_DEMO_DONE is last (after optional tailscale_down); then SIGTERM/KILL.
   set +o pipefail
   if [[ "$QUIET" == "1" ]]; then
     "${timeout_cmd[@]}" stdbuf -oL -eL "$DUCKDB" -batch -echo \
       -cmd "$ext_cmd" -f "$session_sql" \
-      > >(tee "$out") 2>>"$tsnet_log" &
+      2>&1 | tee "$out" "$tsnet_log" >/dev/null &
   else
     "${timeout_cmd[@]}" stdbuf -oL -eL "$DUCKDB" -batch -echo \
       -cmd "$ext_cmd" -f "$session_sql" \
-      2>&1 | tee "$out" &
+      2>&1 | tee "$out" "$tsnet_log" &
   fi
   duck_pid=$!
   deadline=$((SECONDS + demo_timeout + 5))
 
   while kill -0 "$duck_pid" 2>/dev/null; do
     if quacktail_client_session_succeeded "$out"; then
-      # CLIENT_DEMO_DONE is printed before CALL tailscale_down(); allow it to run.
-      sleep 1.5
       quacktail_stop_process "$duck_pid" 500
       set -o pipefail
       return 0
@@ -341,8 +339,15 @@ run_client() {
       quacktail_dump_client_failure
       exit 1
     fi
-    if [[ "$duckdb_rc" -eq 0 ]] && grep -q "CLIENT_DEMO_DONE" "$out" 2>/dev/null; then
+    if quacktail_client_session_succeeded "$out"; then
+      duckdb_rc=0
       break
+    fi
+    if grep -q "PASSED" "$out" 2>/dev/null \
+      && { [[ "${QUACKTAIL_ENABLE_DUCKLAKE:-0}" != "1" ]] || grep -q "LAKE_PASSED" "$out" 2>/dev/null; }; then
+      echo "error: demo passed but CLIENT_DEMO_DONE missing (teardown or exit failed)" >&2
+      quacktail_dump_client_failure
+      exit 1
     fi
     if (( attempt < max_attempts )); then
       [[ "$QUIET" == "1" ]] && echo "→ retry ${attempt}/${max_attempts} ..."
@@ -351,20 +356,8 @@ run_client() {
     fi
   done
 
-  if [[ "$duckdb_rc" -ne 0 ]]; then
-    echo "error: client demo failed (exit ${duckdb_rc})" >&2
-    quacktail_dump_client_failure
-    exit 1
-  fi
-
-  if ! grep -q "PASSED" "$out" 2>/dev/null; then
-    echo "error: expected PASSED row missing after ${max_attempts} attempts" >&2
-    quacktail_dump_client_failure
-    exit 1
-  fi
-
-  if [[ "${QUACKTAIL_ENABLE_DUCKLAKE:-0}" == "1" ]] && ! grep -q "LAKE_PASSED" "$out" 2>/dev/null; then
-    echo "error: expected LAKE_PASSED row missing (DuckLake inventory query failed)" >&2
+  if ! quacktail_client_session_succeeded "$out"; then
+    echo "error: client demo failed after ${max_attempts} attempt(s) (exit ${duckdb_rc})" >&2
     quacktail_dump_client_failure
     exit 1
   fi
