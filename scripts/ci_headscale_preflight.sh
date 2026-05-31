@@ -18,8 +18,8 @@ echo "=== DuckDB ==="
 "$DUCKDB" :memory: -batch -echo -c "CALL tailscale_status();"
 
 if ! "$DUCKDB" -c "LOAD quack; SELECT 1;"; then
-  "$DUCKDB" -c "INSTALL quack FROM core; LOAD quack; SELECT 1;" \
-    || "$DUCKDB" -c "INSTALL quack FROM core_nightly; LOAD quack; SELECT 1;"
+  "$DUCKDB" -c "INSTALL quack FROM core_nightly; LOAD quack; SELECT 1;" \
+    || "$DUCKDB" -c "INSTALL quack FROM core; LOAD quack; SELECT 1;"
 fi
 
 headscale_ci_start "$WORK/headscale-data"

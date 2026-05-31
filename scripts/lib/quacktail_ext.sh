@@ -73,9 +73,9 @@ quacktail_ci_ensure_quack() {
       return 1
     fi
   elif ! "$duckdb_bin" :memory: -batch -c "${set_ext} LOAD quack; SELECT 1;" >/dev/null; then
-    echo "Installing quack (core, then core_nightly) into ${ext_dir} ..."
-    if ! "$duckdb_bin" :memory: -batch -c "${set_ext} INSTALL quack FROM core; LOAD quack; SELECT 1;"; then
-      "$duckdb_bin" :memory: -batch -c "${set_ext} INSTALL quack FROM core_nightly; LOAD quack; SELECT 1;"
+    echo "Installing quack (core_nightly, then core) into ${ext_dir} ..."
+    if ! "$duckdb_bin" :memory: -batch -c "${set_ext} INSTALL quack FROM core_nightly; LOAD quack; SELECT 1;"; then
+      "$duckdb_bin" :memory: -batch -c "${set_ext} INSTALL quack FROM core; LOAD quack; SELECT 1;"
     fi
   fi
 
@@ -106,7 +106,7 @@ quacktail_ci_ensure_quack() {
     "${set_ext} LOAD quack; SELECT extension_name, loaded, install_path FROM duckdb_extensions() WHERE extension_name='quack';"
 }
 
-# Install/load ducklake (core, then core_nightly).
+# Install/load ducklake (core_nightly, then core).
 quacktail_ci_ensure_ducklake() {
   local duckdb_bin="${1:?duckdb binary}"
   local ext_dir="${2:-}"
@@ -126,9 +126,9 @@ quacktail_ci_ensure_ducklake() {
       return 1
     fi
   elif ! "$duckdb_bin" :memory: -batch -c "${set_ext} LOAD ducklake; SELECT 1;" >/dev/null; then
-    echo "Installing ducklake (core, then core_nightly) into ${ext_dir} ..."
-    if ! "$duckdb_bin" :memory: -batch -c "${set_ext} INSTALL ducklake FROM core; LOAD ducklake; SELECT 1;"; then
-      "$duckdb_bin" :memory: -batch -c "${set_ext} INSTALL ducklake FROM core_nightly; LOAD ducklake; SELECT 1;"
+    echo "Installing ducklake (core_nightly, then core) into ${ext_dir} ..."
+    if ! "$duckdb_bin" :memory: -batch -c "${set_ext} INSTALL ducklake FROM core_nightly; LOAD ducklake; SELECT 1;"; then
+      "$duckdb_bin" :memory: -batch -c "${set_ext} INSTALL ducklake FROM core; LOAD ducklake; SELECT 1;"
     fi
   fi
 

@@ -77,10 +77,10 @@ ENV QUACK_PORT=9494
 
 # Install quack + ducklake first, then lay down our quackscale artifact (must not be overwritten).
 RUN mkdir -p /duckdb_extensions /etc/quacktail \
-    && duckdb :memory: -batch -c "SET extension_directory='/duckdb_extensions'; INSTALL quack FROM core; LOAD quack; SELECT 1;" \
-    || duckdb :memory: -batch -c "SET extension_directory='/duckdb_extensions'; INSTALL quack FROM core_nightly; LOAD quack; SELECT 1;" \
-    && duckdb :memory: -batch -c "SET extension_directory='/duckdb_extensions'; INSTALL ducklake FROM core; LOAD ducklake; SELECT 1;" \
-    || duckdb :memory: -batch -c "SET extension_directory='/duckdb_extensions'; INSTALL ducklake FROM core_nightly; LOAD ducklake; SELECT 1;" \
+    && duckdb :memory: -batch -c "SET extension_directory='/duckdb_extensions'; INSTALL quack FROM core_nightly; LOAD quack; SELECT 1;" \
+    || duckdb :memory: -batch -c "SET extension_directory='/duckdb_extensions'; INSTALL quack FROM core; LOAD quack; SELECT 1;" \
+    && duckdb :memory: -batch -c "SET extension_directory='/duckdb_extensions'; INSTALL ducklake FROM core_nightly; LOAD ducklake; SELECT 1;" \
+    || duckdb :memory: -batch -c "SET extension_directory='/duckdb_extensions'; INSTALL ducklake FROM core; LOAD ducklake; SELECT 1;" \
     && if [ -d /opt/quacktail-build/quackscale-ext ]; then \
          install -d /duckdb_extensions/quackscale; \
          install -m644 /opt/quacktail-build/quackscale-ext/quackscale.duckdb_extension \

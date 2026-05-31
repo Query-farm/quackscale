@@ -46,34 +46,29 @@ QuackScale handles **reachability and transport**. Pair it with a fleet-wide `QU
 ## How QuackTail fits together
 
 ```mermaid
-flowchart LR
-    subgraph server["Server (long-lived)"]
-        direction TB
-        S1["tailscale_up()"]
-        S2["quack_serve(127.0.0.1:9494)"]
-        S3["tailscale_serve_local(:9494)"]
-        S1 --> S2 --> S3
+flowchart TB
+    subgraph server["Quack server"]
+        s1[tailscale_up]
+        dl[ATTACH ducklake]
+        pq[(Parquet volume)]
+        sq[quack_serve + serve_local]
+        s1 --> dl
+        dl --- pq
+        dl --> sq
     end
 
-    subgraph mesh["WireGuard mesh"]
-        M(("100.x · MagicDNS"))
-    end
+    m((100.x tailnet))
 
-    subgraph client["Client (job / laptop)"]
-        direction TB
-        C1["tailscale_up()"]
-        C2["tailscale_quack_forward(host)"]
-        C3["ATTACH · quack_query · attach_ducklake"]
-        C1 --> C2 --> C3
-    end
+    sq -->|tailscale_dial| m
 
-    S3 <-->|tailscale_dial| M
-    M <-->|encrypted TCP| C2
-    C2 --> L["quack:127.0.0.1:19494"]
-    C3 --> L
+    c1["client · ATTACH quack"]
+    c2["client · attach_ducklake"]
+
+    m -->|encrypted TCP| c1
+    m -->|encrypted TCP| c2
 ```
 
-**`tailscale_quack_forward`** is required when the client uses embedded tsnet: Quack speaks normal HTTP/TCP, which kernel routing does not send over the tailnet by itself. The forwarder listens on loopback and dials peers via `tailscale_dial`.
+**`tailscale_quack_forward`** is required on each client when using embedded tsnet: Quack speaks normal HTTP/TCP, which kernel routing does not send over the tailnet by itself. The forwarder listens on loopback and dials the server via `tailscale_dial`, then clients use **`ATTACH 'quack:…'`** for the remote catalog or **`attach_ducklake`** for server-owned DuckLake tables.
 
 End-to-end recipes and DuckLake patterns: **[docs/GUIDE.md](docs/GUIDE.md)**.
 
@@ -153,7 +148,7 @@ LOAD quackscale;
 
 CLI equivalent: `duckdb -unsigned` then `LOAD quackscale;`
 
-Install [Quack](https://duckdb.org/docs/current/quack/overview) from core separately (`INSTALL quack FROM core; LOAD quack;`) for `quack_serve`, `ATTACH`, and `quack_query`.
+Install [Quack](https://duckdb.org/docs/current/quack/overview) and [DuckLake](https://duckdb.org/docs/stable/core_extensions/ducklake) from `core_nightly` separately (`INSTALL quack FROM core_nightly; LOAD quack;` and the same for `ducklake`) for `quack_serve`, `ATTACH`, and catalog-over-Quack workloads.
 
 ### QuackTail release bundle (GitHub Releases)
 
@@ -222,6 +217,8 @@ CALL tailscale_down();
 ### DuckLake over the tailnet
 
 Query a **server-owned** DuckLake catalog from a tailnet client. Parquet stays on the server; the client uses `attach_ducklake` to create local views that delegate to the remote lake (same path as the [compose demo](examples/README.md)).
+
+When Parquet lives on the server volume only, use **`attach_ducklake`**. When every reader can reach the same `DATA_PATH` (local disk, NFS, or `s3://`), use DuckDB 1.5.3 **catalog-over-Quack**: `ATTACH 'ducklake:quack:…' AS lake (DATA_PATH '…')` after `CREATE SECRET (TYPE quack, …)` — see [examples/ducklake/local-demo.sql](examples/ducklake/local-demo.sql).
 
 **Server** — attach DuckLake locally, then expose Quack on the mesh:
 

@@ -1,4 +1,4 @@
--- DuckLake + Quack on one host (no tailnet). Requires DuckDB 1.5+ with quack + ducklake from core.
+-- DuckLake + Quack on one host (no tailnet). Requires DuckDB 1.5+ with quack + ducklake from core_nightly.
 --
 -- Server session (terminal 1):
 --   duckdb server.duckdb
@@ -7,8 +7,8 @@
 --   duckdb
 
 -- === Server ===
-INSTALL quack FROM core;
-INSTALL ducklake FROM core;
+INSTALL quack FROM core_nightly;
+INSTALL ducklake FROM core_nightly;
 LOAD quack;
 LOAD ducklake;
 
@@ -25,16 +25,18 @@ CALL quack_serve(
 );
 
 -- === Client (new duckdb process) ===
--- INSTALL quack FROM core;
--- INSTALL ducklake FROM core;
--- LOAD quack;
+-- INSTALL quack FROM core_nightly;
+-- INSTALL ducklake FROM core_nightly;
 -- LOAD ducklake;
+-- LOAD quack;
 --
--- CREATE SECRET (TYPE quack, TOKEN 'quackscale-demo-token', SCOPE 'quack:127.0.0.1:9494');
+-- CREATE SECRET (TYPE quack, TOKEN 'quackscale-demo-token');
 --
--- Option A: query lake tables via DuckLake-over-Quack (catalog over Quack, Parquet via DATA_PATH)
--- ATTACH 'quack:127.0.0.1:9494' AS remote (TYPE quack);
 -- ATTACH 'ducklake:quack:127.0.0.1:9494' AS lake (DATA_PATH './lake/data/');
--- SELECT * FROM lake.inventory;
+-- USE lake;
 --
--- Do NOT use remote.lake.inventory — plain quack attach does not expose nested DuckLake catalogs.
+-- SELECT * FROM inventory ORDER BY item_id;
+-- INSERT INTO inventory VALUES (103, 75);
+--
+-- Time travel: snapshot after the server seed (version 2) before the client INSERT above.
+-- SELECT * FROM inventory AT (VERSION => 2);
