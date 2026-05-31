@@ -243,7 +243,9 @@ flowchart TB
     m -->|encrypted TCP| c2
 ```
 
-**`tailscale_quack_forward`** is required on each client when using embedded tsnet: Quack speaks normal HTTP/TCP, which kernel routing does not send over the tailnet by itself. The forwarder listens on loopback and dials the server via `tailscale_dial`, then clients use **`ATTACH 'quack:…'`** for the remote catalog or **`attach_ducklake`** for server-owned DuckLake tables.
+After `tailscale_up`, QuackScale wraps DuckDB's HTTP layer so requests to tailnet hosts (`100.64.0.0/10`, `*.ts.net`) are dialed over tsnet automatically — clients can **`ATTACH 'quack:100.x.x.x:9494'`** directly, no forwarder. Opt out with `http_route => false`.
+
+**`tailscale_quack_forward`** remains for cases the router does not cover: bare MagicDNS **short** names (e.g. `lake-server` without a `.ts.net` suffix), a pinned `127.0.0.1:<port>` endpoint, or non-HTTP consumers. It listens on loopback and dials the server via `tailscale_dial`. Either path feeds **`ATTACH 'quack:…'`** or **`attach_ducklake`**.
 
 End-to-end recipes and DuckLake patterns: **[docs/GUIDE.md](docs/GUIDE.md)**.
 
@@ -251,7 +253,7 @@ End-to-end recipes and DuckLake patterns: **[docs/GUIDE.md](docs/GUIDE.md)**.
 
 ## SQL API (`LOAD quackscale`)
 
-Use **`CALL`** for table functions (same style as `CALL quack_serve`). Parameters for `tailscale_up` / `tailscale_login`: `hostname`, `authkey` (or `TS_AUTHKEY` env), `control_url`, `state_dir`, `ephemeral`, `loopback_proxy`.
+Use **`CALL`** for table functions (same style as `CALL quack_serve`). Parameters for `tailscale_up` / `tailscale_login`: `hostname`, `authkey` (or `TS_AUTHKEY` env), `control_url`, `state_dir`, `ephemeral`, `loopback_proxy`, `http_route` (transparent HTTP routing to tailnet hosts — default `true`).
 
 ### Tailnet lifecycle
 
@@ -269,7 +271,7 @@ Use **`CALL`** for table functions (same style as `CALL quack_serve`). Parameter
 |---------|---------|
 | [`CALL tailscale_serve_local(port => 9494)`](docs/GUIDE.md#use-case-1--remote-duckdb-hub-pattern-a) | Tailscale Serve: tailnet TCP **→** `127.0.0.1:9494`. Run after local `quack_serve`. |
 | [`CALL tailscale_ping(host => 'peer', port => 9494)`](docs/GUIDE.md#observability) | TCP dial to a peer over tsnet — readiness before Quack `ATTACH`. |
-| [`CALL tailscale_quack_forward(host => 'peer', port => 9494)`](docs/GUIDE.md#standard-client-connection-recipe) | Listen on loopback; dial peer for each Quack HTTP connection. Returns `quack_uri`. **Preferred client path.** |
+| [`CALL tailscale_quack_forward(host => 'peer', port => 9494)`](docs/GUIDE.md#standard-client-connection-recipe) | Listen on loopback; dial peer for each Quack HTTP connection. Returns `quack_uri`. For MagicDNS short names, pinned local ports, or non-HTTP clients — otherwise `ATTACH 'quack:100.x:9494'` works directly after `tailscale_up`. |
 | [`CALL tailscale_quack_proxy()`](docs/DEVELOPMENT.md) | Legacy SOCKS proxy + `ALL_PROXY` — deprecated; use `tailscale_quack_forward`. |
 | [`CALL tailscale_proxy_status()`](docs/DEVELOPMENT.md) | Legacy SOCKS status. |
 

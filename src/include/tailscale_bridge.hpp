@@ -80,7 +80,14 @@ public:
 	//! Dial host:port over the tailnet via tsnet (peer connectivity check).
 	void PingTCP(const string &host, idx_t port, idx_t timeout_ms);
 
+	//! Dial a tailnet peer over tsnet and return the connected socket fd (caller owns/closes
+	//! it). Throws if the node is not up or the dial fails. Used by the HTTPUtil router.
+	int DialTCP(const string &host, idx_t port);
+
 	string PrimaryTailnetIP() const;
+	//! First IPv4 tailnet address (100.64.0.0/10) — the one the transparent HTTPUtil router
+	//! can reach. Empty if the node only has an IPv6 tailnet address yet.
+	string RoutableTailnetIP() const;
 	string FormatQuackURI(const string &host, idx_t port) const;
 	string QuackListenURI(idx_t port = QUACKSCALE_DEFAULT_QUACK_PORT) const;
 	vector<QuackDiscoveryEndpoint> QuackDiscoveryEndpoints(idx_t port = QUACKSCALE_DEFAULT_QUACK_PORT) const;

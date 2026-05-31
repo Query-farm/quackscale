@@ -114,6 +114,32 @@ FROM quack_query(
 SQL
 }
 
+# Direct ATTACH over the transparent HTTPUtil router — NO tailscale_quack_forward. tailscale_up
+# auto-installs the router, so the server's 100.x tailnet IP is dialed over tsnet directly.
+# MagicDNS short names are not routable this way (base_domain is not *.ts.net), hence the IP.
+compose_sql_router_probe() {
+  local server_ip="${1:?server tailnet ip required}"
+  local router_uri="quack:${server_ip}:${QUACK_PORT}"
+  cat <<SQL
+-- transparent router probe: ATTACH the server tailnet IP directly (no forwarder)
+CREATE SECRET router_secret (
+    TYPE quack,
+    TOKEN '${QUACK_TOKEN}',
+    SCOPE '${router_uri}'
+);
+
+ATTACH '${router_uri}' AS remote_router (
+    TYPE quack,
+    DISABLE_SSL true
+);
+
+SELECT 'ROUTER_PASSED' AS status, '${router_uri}' AS router_uri, COUNT(*)::INTEGER AS total_rows
+FROM remote_router.e2e_payload;
+
+DETACH remote_router;
+SQL
+}
+
 write_server_ducklake_sql() {
   [[ "$ENABLE_DUCKLAKE" == "1" ]] || return 0
   mkdir -p "$(dirname "$LAKE_METADATA")" "$LAKE_DATA_PATH"
@@ -182,6 +208,17 @@ write_client_session_sql() {
   local lake_select=""
   local lake_passed_sql=""
   local lake_discover_sql=""
+  local router_probe_sql=""
+  # Transparent-router probe: only when this build supports it AND the server's tailnet IP is
+  # resolvable (server already registered). Skipped on initial server boot; the client run
+  # regenerates this session after the server is up, so the probe is present by then.
+  if quacktail_quackscale_supports_router; then
+    local server_ip
+    server_ip="$(resolve_server_tailnet_ip)"
+    if [[ -n "$server_ip" ]]; then
+      router_probe_sql="$(compose_sql_router_probe "$server_ip")"
+    fi
+  fi
   if duckdb_has_quackscale_function tailscale_ping; then
     ping_sql="CALL tailscale_ping(host => '${SERVER_HOST}', port => ${QUACK_PORT});"
   fi
@@ -235,6 +272,8 @@ FROM quack_query(
     token => '${QUACK_TOKEN}',
     disable_ssl => true
 );
+
+${router_probe_sql}
 
 ${lake_discover_sql}
 ${lake_attach_sql}

@@ -4,11 +4,13 @@
 #include "quackscale_defaults.hpp"
 #include "attach_ducklake.hpp"
 #include "tailscale_bridge.hpp"
+#include "tailscale_http.hpp"
 
 #include "duckdb.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/function/scalar_function.hpp"
 #include "duckdb/function/table_function.hpp"
+#include "duckdb/main/database.hpp"
 #include "duckdb/parser/parsed_data/create_scalar_function_info.hpp"
 
 #include <cstdlib>
@@ -57,10 +59,38 @@ static void RegisterAuthParameters(TableFunction &function) {
 	function.named_parameters["state_dir"] = LogicalType::VARCHAR;
 	function.named_parameters["ephemeral"] = LogicalType::BOOLEAN;
 	function.named_parameters["loopback_proxy"] = LogicalType::BOOLEAN;
+	// Transparent HTTP routing: when true (default) tailscale_up/login installs the HTTPUtil
+	// so HTTP to tailnet hosts (100.64/10, *.ts.net) is dialed over tsnet — ATTACH 'quack:...'
+	// works without tailscale_quack_forward. Set false to use only the forwarder.
+	function.named_parameters["http_route"] = LogicalType::BOOLEAN;
+}
+
+//! Whether transparent HTTP routing was requested (default true). Kept out of
+//! TailscaleAuthConfig because installing the router needs the DatabaseInstance, which only
+//! the table function has — the bridge is database-agnostic.
+static bool ParseHttpRoute(TableFunctionBindInput &input) {
+	auto it = input.named_parameters.find("http_route");
+	if (it != input.named_parameters.end() && !it->second.IsNull()) {
+		return it->second.GetValue<bool>();
+	}
+	return true;
+}
+
+//! Install the tailnet HTTPUtil router unless the user opted out. No-op without libtailscale.
+static void MaybeInstallHttpRoute(ClientContext &context, bool http_route) {
+#ifdef QUACKSCALE_WITH_TAILSCALE
+	if (http_route) {
+		RegisterTailscaleHTTPUtil(DatabaseInstance::GetDatabase(context));
+	}
+#else
+	(void)context;
+	(void)http_route;
+#endif
 }
 
 struct QuackscaleUpBindData : public TableFunctionData {
 	TailscaleAuthConfig config;
+	bool http_route = true;
 	bool finished = false;
 };
 
@@ -68,6 +98,7 @@ static unique_ptr<FunctionData> QuackscaleUpBind(ClientContext &context, TableFu
                                                  vector<LogicalType> &return_types, vector<string> &names) {
 	auto bind = make_uniq<QuackscaleUpBindData>();
 	bind->config = ParseAuthConfig(input);
+	bind->http_route = ParseHttpRoute(input);
 
 	return_types = {LogicalType::BOOLEAN, LogicalType::VARCHAR, LogicalType::LIST(LogicalType::VARCHAR)};
 	names = {"running", "hostname", "tailnet_ips"};
@@ -83,6 +114,9 @@ static void QuackscaleUpFunction(ClientContext &context, TableFunctionInput &dat
 	auto &bridge = TailscaleBridge::Get();
 	bridge.Up(bind.config);
 	auto status = bridge.Status();
+	if (status.running) {
+		MaybeInstallHttpRoute(context, bind.http_route);
+	}
 
 	output.SetCardinality(1);
 	output.SetValue(0, 0, Value::BOOLEAN(status.running));
@@ -217,6 +251,7 @@ static void QuackscaleDiscoverFunction(ClientContext &context, TableFunctionInpu
 
 struct QuackscaleBeginLoginBindData : public TableFunctionData {
 	TailscaleAuthConfig config;
+	bool http_route = true;
 	bool finished = false;
 };
 
@@ -224,6 +259,7 @@ static unique_ptr<FunctionData> QuackscaleBeginLoginBind(ClientContext &context,
                                                          vector<LogicalType> &return_types, vector<string> &names) {
 	auto bind = make_uniq<QuackscaleBeginLoginBindData>();
 	bind->config = ParseAuthConfig(input);
+	bind->http_route = ParseHttpRoute(input);
 	return_types = {LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR};
 	names = {"status", "login_url", "message"};
 	return std::move(bind);
@@ -234,6 +270,10 @@ static void QuackscaleBeginLoginFunction(ClientContext &context, TableFunctionIn
 	if (bind.finished) {
 		return;
 	}
+	// Login is asynchronous, so install the router now: the wrap is inert until the node is
+	// up (dials for tailnet hosts simply fail until then), and this avoids threading the
+	// http_route flag through the login-status polling path.
+	MaybeInstallHttpRoute(context, bind.http_route);
 	TailscaleBridge::Get().BeginInteractiveLogin(bind.config);
 	auto login = TailscaleBridge::Get().LoginStatus();
 	output.SetCardinality(1);
