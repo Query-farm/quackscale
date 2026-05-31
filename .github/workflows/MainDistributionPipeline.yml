@@ -3,8 +3,7 @@
 #
 name: Main Extension Distribution Pipeline
 on:
-  push:
-  pull_request:
+  release:
   workflow_dispatch:
 
 concurrency:
