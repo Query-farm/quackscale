@@ -72,11 +72,27 @@ When bumping the DuckDB target:
 |----------|---------|---------|
 | [headscale-e2e.yml](../.github/workflows/headscale-e2e.yml) | **Manual only** | Release-binary two-node e2e (no source build) |
 | [headscale-integration.yml](../.github/workflows/headscale-integration.yml) | PR | Source build + Headscale smoke |
-| [Release.yml](../.github/workflows/Release.yml) | Release published | Build linux release tarball |
+| [Release.yml](../.github/workflows/Release.yml) | Release published / manual | Extension repo → GitHub Pages; linux QuackTail tarball → Releases |
 | [libtailscale-integration.yml](../.github/workflows/libtailscale-integration.yml) | PR | libtailscale `go test` |
 | [MainDistributionPipeline.yml](../.github/workflows/MainDistributionPipeline.yml) | PR | Extension distribution CI |
 
 **E2e never runs on push/PR** and never compiles DuckDB in CI — use `workflow_dispatch` on `headscale-e2e` with a release tag. Full DuckLake compose demo is local dev only (`scripts/ci_compose_e2e.sh`).
+
+### Release and GitHub Pages
+
+On **Release published** (or manual **Release** workflow):
+
+1. **build** — extension-ci-tools matrix (`quackscale` per platform, same exclusions as MainDistributionPipeline).
+2. **package-pages** + **deploy-pages** — unsigned `.duckdb_extension.gz` under `v1.5.3/{arch}/` at `https://quackscience.github.io/duckdb-quackscale`.
+3. **build-quacktail-bundle** — linux amd64 `quacktail-linux-amd64-{tag}.tar.gz` attached to the GitHub Release.
+
+**One-time repo setup:** Settings → Pages → Build and deployment → **Source: GitHub Actions**.
+
+**Manual Pages-only test:** Actions → Release → Run workflow → leave `release_tag` empty, uncheck skip_pages.
+
+**Manual tarball test:** provide an existing git tag in `release_tag`, uncheck skip_tarball.
+
+Each Pages deploy replaces the whole site (one DuckDB version hosted). To host multiple DuckDB versions, accumulate version directories in a follow-up change.
 
 ## Roadmap (selected)
 
@@ -88,7 +104,7 @@ When bumping the DuckDB target:
 | `ATTACH … TYPE quacktail_lake` (Tier 3 native catalog) | Planned |
 | `ducklake_discover()` enriched discovery | Planned |
 | `quackscale_serve()` one-call server bootstrap | Planned |
-| Community extension descriptor publish | Planned |
+| Community extension descriptor publish | Done (GitHub Pages on release) |
 
 ## Risks
 
