@@ -137,6 +137,34 @@ Do **not** copy the random `auth_token` from each `CALL quack_serve`. Use a flee
 
 ---
 
+## Install
+
+QuackScale ships in two forms: a **loadable extension** (stock DuckDB + `INSTALL`) and a **QuackTail release bundle** (prebuilt `duckdb` binary for Linux CI and compose).
+
+### Loadable extension (GitHub Pages)
+
+Published on each [release](https://github.com/quackscience/duckdb-quackscale/releases) to a DuckDB custom extension repository. Requires **DuckDB v1.5.3** and unsigned extension support:
+
+```sql
+SET allow_unsigned_extensions = true;
+INSTALL quackscale FROM 'https://quackscience.github.io/duckdb-quackscale';
+LOAD quackscale;
+```
+
+CLI equivalent: `duckdb -unsigned` then `LOAD quackscale;`
+
+Install [Quack](https://duckdb.org/docs/current/quack/overview) from core separately (`INSTALL quack FROM core; LOAD quack;`) for `quack_serve`, `ATTACH`, and `quack_query`.
+
+### QuackTail release bundle (GitHub Releases)
+
+Linux amd64 tarball with `duckdb` and `extension/quackscale/quackscale.duckdb_extension` — used by [Headscale e2e CI](.github/workflows/headscale-e2e.yml) and `examples/` with `BUILD_FROM_SOURCE=0`. Download from [Releases](https://github.com/quackscience/duckdb-quackscale/releases) (`quacktail-linux-amd64-*.tar.gz`).
+
+### Build from source
+
+See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for submodules, Go/libtailscale, and `make release`.
+
+---
+
 ## Quick start
 
 ### Server
