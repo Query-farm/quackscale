@@ -116,7 +116,8 @@ SQL
 
 # Direct ATTACH over the transparent HTTPUtil router — NO tailscale_quack_forward. tailscale_up
 # auto-installs the router, so the server's 100.x tailnet IP is dialed over tsnet directly.
-# MagicDNS short names are not routable this way (base_domain is not *.ts.net), hence the IP.
+# A bare MagicDNS short name is not routable this way (it's neither a *.ts.net FQDN nor a 100.x
+# IP, so IsTailnetHost rejects it), hence we attach the resolved IP.
 compose_sql_router_probe() {
   local server_ip="${1:?server tailnet ip required}"
   local router_uri="quack:${server_ip}:${QUACK_PORT}"
@@ -217,7 +218,12 @@ write_client_session_sql() {
     server_ip="$(resolve_server_tailnet_ip)"
     if [[ -n "$server_ip" ]]; then
       router_probe_sql="$(compose_sql_router_probe "$server_ip")"
+      echo "✓ router probe enabled — direct ATTACH quack:${server_ip}:${QUACK_PORT} (no forwarder)" >&2
+    else
+      echo "warn: router probe skipped — server tailnet IP not resolvable yet (regenerated at client run)" >&2
     fi
+  else
+    echo "note: router probe skipped — this quackscale build has no http_route (transparent router)" >&2
   fi
   if duckdb_has_quackscale_function tailscale_ping; then
     ping_sql="CALL tailscale_ping(host => '${SERVER_HOST}', port => ${QUACK_PORT});"

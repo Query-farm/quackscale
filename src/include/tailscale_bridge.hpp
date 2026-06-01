@@ -85,8 +85,9 @@ public:
 	int DialTCP(const string &host, idx_t port);
 
 	string PrimaryTailnetIP() const;
-	//! First IPv4 tailnet address (100.64.0.0/10) — the one the transparent HTTPUtil router
-	//! can reach. Empty if the node only has an IPv6 tailnet address yet.
+	//! First IPv4 (colon-free) tailnet address — in practice the 100.64.0.0/10 CGNAT IP, since
+	//! `ips` only holds tailnet addresses. This is the one the transparent HTTPUtil router can
+	//! reach. Empty if the node only has an IPv6 tailnet address yet.
 	string RoutableTailnetIP() const;
 	string FormatQuackURI(const string &host, idx_t port) const;
 	string QuackListenURI(idx_t port = QUACKSCALE_DEFAULT_QUACK_PORT) const;

@@ -16,15 +16,17 @@ class DatabaseInstance;
 //! are NOT matched — those still need tailscale_quack_forward.
 bool IsTailnetHost(const string &proto_host_port);
 
-//! Install TailscaleHTTPUtil as the database's global HTTP util, wrapping whatever util
-//! is currently registered (httpfs, after auto-load). Idempotent: a second call is a
-//! no-op. Called from tailscale_up once the node is up unless http_route => false.
+//! Install TailscaleHTTPUtil as the database's global HTTP util, wrapping whatever util is
+//! currently registered (httpfs, after auto-load). Idempotent: a second call is a no-op. Called
+//! from tailscale_up (after the node is up) and from tailscale_login (the wrap is inert until the
+//! node comes up), unless http_route => false.
 void RegisterTailscaleHTTPUtil(DatabaseInstance &db);
 
-//! HTTP/1.1 client that speaks plaintext over a tailscale_dial'd fd. The tailnet is the
-//! encryption layer, so we never negotiate TLS here regardless of URL scheme. Holds one
-//! keep-alive connection open across requests and frames responses by Content-Length or
-//! chunked transfer-encoding; a stale pooled connection is transparently redialed once.
+//! HTTP/1.1 client that speaks plaintext over a tailscale_dial'd fd to a tailnet peer (the tailnet
+//! is the encryption layer, so only http:// is routed here — https:// is left to httpfs). Holds
+//! one keep-alive connection open across requests and frames responses by Content-Length, chunked
+//! transfer-encoding, or read-to-EOF (which then closes the connection); a stale pooled connection
+//! is transparently redialed once for idempotent requests.
 class TailscaleHTTPClient : public HTTPClient {
 public:
 	explicit TailscaleHTTPClient(const string &proto_host_port);
@@ -59,10 +61,11 @@ private:
 	bool ReadResponse(const string &method, ParsedResponse &out);
 	bool ReadChunkedBody(string &body);
 
-	string host; //!< parsed from base_url, scheme + port stripped
-	string port; //!< defaults to "80" if the URL omits it
-	int fd = -1; //!< persistent keep-alive connection, -1 == not connected
-	string rx;   //!< bytes read from fd but not yet consumed (carries across requests)
+	string host;            //!< parsed from base_url, scheme + port stripped
+	string port;            //!< defaults to "80" if the URL omits it
+	int fd = -1;            //!< persistent keep-alive connection, -1 == not connected
+	string rx;              //!< bytes read from fd but not consumed; empty on a fresh dial, carried across reused requests
+	bool read_error = false; //!< last ReadMore hit a socket error (vs a clean EOF); reset per response
 	idx_t timeout_seconds = 30;
 };
 

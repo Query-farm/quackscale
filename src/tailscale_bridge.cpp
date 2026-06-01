@@ -484,9 +484,12 @@ int TailscaleBridge::DialTCP(const string &host, idx_t port) {
 		ts_handle = handle;
 	}
 	// Dial outside the lock: tailscale_dial blocks while the netstack establishes the
-	// connection, and the handle is stable once the node is up. Holding g_tailscale_mutex
-	// across the dial would serialize every node operation behind one in-flight connect —
-	// fatal for the parallel range reads httpfs issues over the router.
+	// connection, and the handle is stable once the node is up. tsnet's Dial is safe for
+	// concurrent use on one server, so this is sound — and necessary: holding g_tailscale_mutex
+	// across the dial would serialize every node operation behind one in-flight connect, which
+	// would defeat the parallel range reads httpfs issues over the router. (The forwarder's
+	// dial_fn holds the lock across its dial; that is over-conservative, not a different
+	// requirement.)
 	auto addr = StringUtil::Format("%s:%d", host, port);
 	tailscale_conn conn = -1;
 	if (tailscale_dial(ts_handle, "tcp", addr.c_str(), &conn) != 0) {

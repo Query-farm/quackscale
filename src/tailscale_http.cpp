@@ -46,6 +46,12 @@ static void ParseProtoHostPort(const string &proto_host_port, string &host_out, 
 }
 
 bool IsTailnetHost(const string &proto_host_port) {
+	// Only intercept plaintext HTTP (or scheme-less) URLs. We speak plaintext over WireGuard and
+	// never negotiate TLS, so https:// URLs — even to a tailnet host — are left to the delegate
+	// util (httpfs) which has real TLS, rather than being mis-sent as cleartext.
+	if (StringUtil::StartsWith(StringUtil::Lower(proto_host_port), "https://")) {
+		return false;
+	}
 	string host, port;
 	ParseProtoHostPort(proto_host_port, host, port);
 	if (host.empty()) {
@@ -87,6 +93,45 @@ idx_t ParsePort(const string &port) {
 		return 80;
 	}
 	return static_cast<idx_t>(value);
+}
+
+// Strict decimal length: true only if `s` is non-empty, all ASCII digits, and in range. Rejects
+// "123abc", "+5", "-1" (which would otherwise wrap huge via stoull and drive a runaway read).
+bool ParseContentLength(const string &s, size_t &out) {
+	if (s.empty()) {
+		return false;
+	}
+	for (char c : s) {
+		if (c < '0' || c > '9') {
+			return false;
+		}
+	}
+	try {
+		out = static_cast<size_t>(std::stoull(s));
+	} catch (...) {
+		return false;
+	}
+	return true;
+}
+
+// Strict hex chunk size: hex digits only, no "0x" prefix or sign (extensions are stripped before
+// this by the caller).
+bool ParseChunkSize(const string &s, size_t &out) {
+	if (s.empty()) {
+		return false;
+	}
+	for (char c : s) {
+		bool hex = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+		if (!hex) {
+			return false;
+		}
+	}
+	try {
+		out = static_cast<size_t>(std::stoull(s, nullptr, 16));
+	} catch (...) {
+		return false;
+	}
+	return true;
 }
 
 #ifndef _WIN32
@@ -176,6 +221,13 @@ unique_ptr<HTTPResponse> ToHTTPResponse(TailscaleHTTPClient::ParsedResponse &par
 	response->body = std::move(parsed.body);
 	response->reason = std::move(parsed.reason);
 	response->headers = std::move(parsed.headers);
+	// Reflect the status in success/request_error: HTTPResponse::success defaults true, so without
+	// this a 4xx/5xx — or an unparseable status line (status 0) — would look like a successful
+	// fetch to a caller using Success()/HasRequestError().
+	response->success = parsed.status >= 200 && parsed.status < 400;
+	if (!response->success) {
+		response->request_error = StringUtil::Format("tailscale HTTP status %d %s", parsed.status, parsed.reason);
+	}
 	return response;
 }
 
@@ -209,12 +261,17 @@ bool TailscaleHTTPClient::ReadMore() {
 #ifndef _WIN32
 	char buf[16384];
 	ssize_t n = read(fd, buf, sizeof(buf));
-	if (n <= 0) {
+	if (n == 0) {
+		return false; // clean EOF (peer closed)
+	}
+	if (n < 0) {
+		read_error = true; // socket error / timeout — NOT a clean end of message
 		return false;
 	}
 	rx.append(buf, static_cast<size_t>(n));
 	return true;
 #else
+	read_error = true;
 	return false;
 #endif
 }
@@ -236,10 +293,8 @@ bool TailscaleHTTPClient::ReadChunkedBody(string &body) {
 		}
 		StringUtil::Trim(size_line);
 		size_t chunk_size = 0;
-		try {
-			chunk_size = static_cast<size_t>(std::stoull(size_line, nullptr, 16));
-		} catch (...) {
-			return false;
+		if (!ParseChunkSize(size_line, chunk_size)) {
+			return false; // malformed chunk size — framing is unrecoverable
 		}
 
 		if (chunk_size == 0) {
@@ -270,6 +325,7 @@ bool TailscaleHTTPClient::ReadChunkedBody(string &body) {
 }
 
 bool TailscaleHTTPClient::ReadResponse(const string &method, ParsedResponse &out) {
+	read_error = false;
 	// 1. Header block.
 	size_t header_end;
 	while ((header_end = rx.find("\r\n\r\n")) == string::npos) {
@@ -300,25 +356,34 @@ bool TailscaleHTTPClient::ReadResponse(const string &method, ParsedResponse &out
 		return ReadChunkedBody(out.body);
 	}
 	if (out.headers.HasHeader("Content-Length")) {
+		auto raw = out.headers.GetHeaderValue("Content-Length");
+		StringUtil::Trim(raw);
 		size_t len = 0;
-		try {
-			len = static_cast<size_t>(std::stoull(out.headers.GetHeaderValue("Content-Length")));
-		} catch (...) {
+		if (!ParseContentLength(raw, len)) {
+			out.connection_close = true; // malformed length — connection framing is now unknown
 			return false;
 		}
 		while (rx.size() < len) {
 			if (!ReadMore()) {
-				return false;
+				return false; // short read: surfaced as a request failure, never a truncated body
 			}
 		}
 		out.body = rx.substr(0, len);
 		rx.erase(0, len);
+		// On a kept-alive connection there must be nothing after the body until our next request;
+		// leftover bytes mean the stream is desynced, so don't reuse this connection.
+		if (!out.connection_close && !rx.empty()) {
+			out.connection_close = true;
+		}
 		return true;
 	}
 
 	// No length signal: the body runs until EOF, so the connection cannot be reused.
 	out.connection_close = true;
 	while (ReadMore()) {
+	}
+	if (read_error) {
+		return false; // a socket error/timeout mid-body is not a clean EOF — don't accept a truncated body
 	}
 	out.body = std::move(rx);
 	rx.clear();
@@ -329,8 +394,10 @@ TailscaleHTTPClient::ParsedResponse TailscaleHTTPClient::RoundTrip(const string 
                                                                    const HTTPHeaders &headers, const_data_ptr_t body,
                                                                    idx_t body_len, bool has_body) {
 #ifndef _WIN32
-	// Try at most twice: a connection reused from the keep-alive pool may have been closed
-	// by the peer while idle. A failure on a *fresh* connection is a real error.
+	// Try at most twice: a connection reused from the keep-alive pool may have been closed by the
+	// peer while idle. A failure on a *fresh* connection is a real error. Only idempotent requests
+	// (no body — GET/HEAD/DELETE) are retried; resending a POST/PUT body could double-execute a
+	// write the server already processed before dropping the socket.
 	for (int attempt = 0; attempt < 2; attempt++) {
 		bool reused = (fd >= 0);
 		if (fd < 0) {
@@ -356,8 +423,8 @@ TailscaleHTTPClient::ParsedResponse TailscaleHTTPClient::RoundTrip(const string 
 		}
 		if (!ok) {
 			CloseConn();
-			if (reused) {
-				continue; // stale keep-alive connection: redial and retry once
+			if (reused && !has_body) {
+				continue; // stale idle keep-alive on an idempotent request: redial and retry once
 			}
 			throw IOException("tailscale HTTP: request to %s:%s failed", host, port);
 		}

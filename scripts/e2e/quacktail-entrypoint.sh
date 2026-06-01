@@ -396,6 +396,14 @@ run_client() {
     exit 1
   fi
 
+  # Make router coverage explicit: green output should never leave it ambiguous whether the
+  # transparent-router path (direct ATTACH, no forwarder) was actually exercised this run.
+  if grep -q "ROUTER_PASSED" "${WORK}/client_session.sql" 2>/dev/null; then
+    echo "✓ transparent router exercised (ROUTER_PASSED)"
+  else
+    echo "note: transparent-router probe not in this session — forwarder path only (see bootstrap log)"
+  fi
+
   if [[ "$QUIET" == "1" ]]; then
     quacktail_show_client_demo_output "$out"
     echo ""
