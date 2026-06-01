@@ -31,6 +31,32 @@ quacktail_has_quackscale_function() {
   [[ "$count" == "1" ]]
 }
 
+# True if this quackscale build supports transparent HTTP routing (the http_route parameter
+# on tailscale_up). Gates the e2e router probe so older release binaries are not asserted.
+# Fails *loudly* (logs an error) if quackscale can't even load, so a broken build is not
+# silently mistaken for "old build without the router".
+quacktail_quackscale_supports_router() {
+  local duckdb_bin="${DUCKDB_BIN:-/usr/local/bin/duckdb}"
+  local ext_dir="${DUCKDB_EXTENSION_DIRECTORY:-$(quacktail_ext_container_dir)}"
+  local set_ext="SET extension_directory='${ext_dir}';"
+  local out
+  [[ -x "$duckdb_bin" ]] || { echo "warn: router probe: duckdb not executable at $duckdb_bin" >&2; return 1; }
+
+  # Baseline: prove quackscale actually loads and runs. If this fails the build is broken — say so
+  # loudly rather than silently concluding "router unsupported" (which would skip the assertion).
+  if ! "$duckdb_bin" :memory: -batch -c "${set_ext} LOAD quackscale; SELECT 1;" >/dev/null 2>&1; then
+    echo "error: router probe: 'LOAD quackscale; SELECT 1' failed — quackscale not loadable at ${ext_dir}" >&2
+    return 1
+  fi
+
+  # An invalid named parameter makes tailscale_up list its valid ones (a bind-time error, so
+  # tailscale_up never runs). "http_route" in that list ⇒ this build has the router.
+  out="$("$duckdb_bin" :memory: -batch -c \
+    "${set_ext} LOAD quackscale; CALL tailscale_up(quackscale_router_capability_probe => true);" \
+    2>&1)" || true
+  printf '%s\n' "$out" | grep -q 'http_route'
+}
+
 quacktail_list_quackscale_functions() {
   local duckdb_bin="${DUCKDB_BIN:-/usr/local/bin/duckdb}"
   local ext_dir="${DUCKDB_EXTENSION_DIRECTORY:-$(quacktail_ext_container_dir)}"

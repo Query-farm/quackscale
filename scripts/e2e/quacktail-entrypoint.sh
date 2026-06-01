@@ -197,6 +197,11 @@ quacktail_client_session_succeeded() {
   if [[ "${QUACKTAIL_ENABLE_DUCKLAKE:-0}" == "1" ]]; then
     grep -q "LAKE_PASSED" "$out" 2>/dev/null || return 1
   fi
+  # If the session includes the transparent-router probe (direct ATTACH, no forwarder), it
+  # must pass too. Gated on the generated SQL so older builds without the probe still pass.
+  if grep -q "ROUTER_PASSED" "${WORK}/client_session.sql" 2>/dev/null; then
+    grep -q "ROUTER_PASSED" "$out" 2>/dev/null || return 1
+  fi
   return 0
 }
 
@@ -389,6 +394,14 @@ run_client() {
     echo "error: client demo failed after ${max_attempts} attempt(s) (exit ${duckdb_rc})" >&2
     quacktail_dump_client_failure
     exit 1
+  fi
+
+  # Make router coverage explicit: green output should never leave it ambiguous whether the
+  # transparent-router path (direct ATTACH, no forwarder) was actually exercised this run.
+  if grep -q "ROUTER_PASSED" "${WORK}/client_session.sql" 2>/dev/null; then
+    echo "✓ transparent router exercised (ROUTER_PASSED)"
+  else
+    echo "note: transparent-router probe not in this session — forwarder path only (see bootstrap log)"
   fi
 
   if [[ "$QUIET" == "1" ]]; then

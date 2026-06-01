@@ -56,3 +56,17 @@ statement error
 CALL attach_ducklake('quack:127.0.0.1:19494');
 ----
 attach_ducklake requires LOAD quack
+
+# http_route (transparent HTTPUtil routing, default on) is a recognized parameter on
+# tailscale_up/tailscale_login. An invalid parameter error lists the valid ones, so the
+# presence of "http_route" in the message proves it is registered. Live routing behaviour
+# (ATTACH 'quack:100.x:...' with no forwarder, keep-alive) is covered by the e2e suite.
+statement error
+CALL tailscale_up(not_a_real_param => true);
+----
+http_route
+
+statement error
+CALL tailscale_login(not_a_real_param => true);
+----
+http_route

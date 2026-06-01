@@ -30,7 +30,9 @@ Credentials: [AUTHENTICATION.md](AUTHENTICATION.md). Build and SQL reference: [R
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-**Why `tailscale_quack_forward`?** Quack uses normal HTTP/TCP. Embedded tsnet does not route kernel TCP to tailnet IPs. The forwarder listens on loopback and dials the peer via `tailscale_dial`.
+**Transparent routing (default).** After `tailscale_up`, QuackScale wraps DuckDB's HTTP layer so requests to tailnet hosts (`100.64.0.0/10`, `*.ts.net`) are dialed over tsnet — `ATTACH 'quack:100.x.x.x:9494'` works with no forwarder. Disable with `tailscale_up(..., http_route => false)`.
+
+**Why `tailscale_quack_forward`?** It covers what the router does not: bare MagicDNS **short** names (no `.ts.net` suffix), a pinned `127.0.0.1:<port>` endpoint, or non-HTTP clients. It listens on loopback and dials the peer via `tailscale_dial`. The compose demo uses it (stable hostnames) and also probes the direct-router path.
 
 **Why `tailscale_down`?** `tailscale_up` and the forwarder start background threads. One-shot DuckDB processes **hang after SQL finishes** unless tsnet is shut down.
 
@@ -325,7 +327,7 @@ DuckLake metadata: file (`*.ducklake`), Postgres, or DuckDB — see [DuckLake at
 |-------|------------|
 | `remote.lake.table` does not exist | Use `attach_ducklake`, `quack_query`, or `ducklake:quack:` |
 | Client hangs after SQL completes | Emit done marker, then `CALL tailscale_down()` |
-| Kernel TCP to `100.x:9494` fails from tsnet client | Use `tailscale_quack_forward` |
+| Kernel TCP to `100.x:9494` fails from tsnet client | `ATTACH 'quack:100.x:9494'` after `tailscale_up` (transparent router), or `tailscale_quack_forward` for short names / non-HTTP |
 | `quack_query` + `ATTACH remote` stalls | Run lake queries **before** attach; separate statements |
 | `quack_query(…, quack_discover())` hangs | Discover locally or use known hostname |
 

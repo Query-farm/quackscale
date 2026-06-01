@@ -466,6 +466,43 @@ void TailscaleBridge::PingTCP(const string &host, idx_t port, idx_t timeout_ms) 
 #endif
 }
 
+int TailscaleBridge::DialTCP(const string &host, idx_t port) {
+#ifdef QUACKSCALE_WITH_TAILSCALE
+	if (host.empty()) {
+		throw IOException("tailscale dial: host must not be empty");
+	}
+	if (port == 0 || port > 65535) {
+		throw IOException("tailscale dial: port must be between 1 and 65535");
+	}
+	int ts_handle;
+	{
+		std::lock_guard<std::mutex> guard(g_tailscale_mutex);
+		if (!running) {
+			throw IOException("tailscale dial: node is not up; call tailscale_up() first");
+		}
+		EnsureHandle();
+		ts_handle = handle;
+	}
+	// Dial outside the lock: tailscale_dial blocks while the netstack establishes the
+	// connection, and the handle is stable once the node is up. tsnet's Dial is safe for
+	// concurrent use on one server, so this is sound — and necessary: holding g_tailscale_mutex
+	// across the dial would serialize every node operation behind one in-flight connect, which
+	// would defeat the parallel range reads httpfs issues over the router. (The forwarder's
+	// dial_fn holds the lock across its dial; that is over-conservative, not a different
+	// requirement.)
+	auto addr = StringUtil::Format("%s:%d", host, port);
+	tailscale_conn conn = -1;
+	if (tailscale_dial(ts_handle, "tcp", addr.c_str(), &conn) != 0) {
+		throw IOException("tailscale_dial(%s) failed: %s", addr, LastErrorMessage());
+	}
+	return conn;
+#else
+	(void)host;
+	(void)port;
+	throw NotImplementedException("QuackScale was built without libtailscale.");
+#endif
+}
+
 string TailscaleBridge::PrimaryTailnetIP() const {
 	if (ips.empty()) {
 		throw InvalidInputException("Tailscale is not up or has no tailnet IPs yet. Call tailscale_up() first.");
@@ -480,7 +517,24 @@ string TailscaleBridge::FormatQuackURI(const string &host, idx_t port) const {
 	return StringUtil::Format("quack:%s:%d", host, port);
 }
 
+string TailscaleBridge::RoutableTailnetIP() const {
+	// IsTailnetHost (the transparent HTTPUtil router) matches IPv4 in 100.64.0.0/10, not the
+	// IPv6 ULA; the first colon-free address is our tailnet IPv4.
+	for (auto &ip : ips) {
+		if (ip.find(':') == string::npos) {
+			return ip;
+		}
+	}
+	return string();
+}
+
 string TailscaleBridge::QuackListenURI(idx_t port) const {
+	// Prefer the routable 100.x IPv4 so the returned URI works with the transparent router
+	// (ATTACH 'quack:100.x:port') without a forwarder. Fall back to MagicDNS, then any IP.
+	auto routable = RoutableTailnetIP();
+	if (!routable.empty()) {
+		return FormatQuackURI(routable, port);
+	}
 	if (!hostname.empty()) {
 		return FormatQuackURI(hostname, port);
 	}
@@ -493,21 +547,26 @@ vector<QuackDiscoveryEndpoint> TailscaleBridge::QuackDiscoveryEndpoints(idx_t po
 		return endpoints;
 	}
 
-	if (!hostname.empty()) {
-		QuackDiscoveryEndpoint entry;
-		entry.host = hostname;
-		entry.port = port;
-		entry.via = "magicdns";
-		entry.listen_uri = FormatQuackURI(hostname, port);
-		endpoints.push_back(std::move(entry));
-	}
-
+	// Tailnet IPs first: the IPv4 100.x address is directly ATTACH-able through the transparent
+	// HTTPUtil router, so it leads. (IPv6 rows follow; IsTailnetHost does not match them yet.)
 	for (auto &ip : ips) {
 		QuackDiscoveryEndpoint entry;
 		entry.host = ip;
 		entry.port = port;
 		entry.via = "tailnet_ip";
 		entry.listen_uri = FormatQuackURI(ip, port);
+		endpoints.push_back(std::move(entry));
+	}
+
+	// MagicDNS short name last: friendlier to type, but only reachable via
+	// tailscale_quack_forward — IsTailnetHost matches *.ts.net FQDNs and 100.x IPs, not bare
+	// short names.
+	if (!hostname.empty()) {
+		QuackDiscoveryEndpoint entry;
+		entry.host = hostname;
+		entry.port = port;
+		entry.via = "magicdns";
+		entry.listen_uri = FormatQuackURI(hostname, port);
 		endpoints.push_back(std::move(entry));
 	}
 	return endpoints;
