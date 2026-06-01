@@ -346,8 +346,8 @@ bool TailscaleHTTPClient::ReadResponse(const string &method, ParsedResponse &out
 	}
 
 	// 2. Body framing. These statuses (and HEAD) never carry a body.
-	bool no_body = method == "HEAD" || out.status == 204 || out.status == 304 ||
-	               (out.status >= 100 && out.status < 200);
+	bool no_body =
+	    method == "HEAD" || out.status == 204 || out.status == 304 || (out.status >= 100 && out.status < 200);
 	if (no_body) {
 		return true;
 	}

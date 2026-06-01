@@ -57,14 +57,14 @@ private:
 	                         const_data_ptr_t body, idx_t body_len, bool has_body);
 
 	void CloseConn();
-	bool ReadMore();                            //!< append one chunk of socket data into rx; false on EOF/error
+	bool ReadMore(); //!< append one chunk of socket data into rx; false on EOF/error
 	bool ReadResponse(const string &method, ParsedResponse &out);
 	bool ReadChunkedBody(string &body);
 
-	string host;            //!< parsed from base_url, scheme + port stripped
-	string port;            //!< defaults to "80" if the URL omits it
-	int fd = -1;            //!< persistent keep-alive connection, -1 == not connected
-	string rx;              //!< bytes read from fd but not consumed; empty on a fresh dial, carried across reused requests
+	string host; //!< parsed from base_url, scheme + port stripped
+	string port; //!< defaults to "80" if the URL omits it
+	int fd = -1; //!< persistent keep-alive connection, -1 == not connected
+	string rx;   //!< bytes read from fd but not consumed; empty on a fresh dial, carried across reused requests
 	bool read_error = false; //!< last ReadMore hit a socket error (vs a clean EOF); reset per response
 	idx_t timeout_seconds = 30;
 };
