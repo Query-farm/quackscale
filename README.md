@@ -2,81 +2,64 @@
 
 # QuackScale
 
-**QuackScale** embeds a WireGuard client for Tailscale/Headscale/etc ([libtailscale](https://github.com/tailscale/libtailscale)) inside DuckDB so a process can join a private tailnet and reach peers over encrypted mesh networking — without a separate VPN sidecar, tunnel daemon, or public ingress.
+QuackScale embeds a Tailscale client ([libtailscale](https://github.com/tailscale/libtailscale)) inside DuckDB. A DuckDB process joins your private [Tailscale](https://tailscale.com/) network ([tailnet](https://tailscale.com/docs/concepts/tailnet)) and reaches its peers over encrypted WireGuard. It needs no VPN sidecar and opens no public port.
 
-Combined with DuckDB’s [Quack](https://duckdb.org/docs/current/quack/overview) HTTP protocol, you get **QuackTail**: SQL engines that discover each other on `100.x.x.x` / MagicDNS, authenticate callers, and run `ATTACH`, `quack_query`, and DuckLake workloads across the mesh.
+Once your process is on the tailnet, you read any HTTP asset a peer serves as if it sat on local disk. `FROM read_csv('http://my-laptop.ts.net:8000/sales.csv')` pulls the file straight off another machine over the encrypted mesh, with no public URL and no copy step.
+
+Pair it with DuckDB's [Quack](https://duckdb.org/docs/current/quack/overview) HTTP protocol and you have **QuackTail**: SQL engines that find each other on `100.x` addresses and [MagicDNS](https://tailscale.com/docs/features/magicdns), then run `ATTACH`, `quack_query`, and DuckLake workloads across the mesh.
 
 ```sql
 LOAD quack;       -- HTTP server, ATTACH, quack_query
-LOAD quackscale;  -- tailnet join, dial, forward, serve — all from SQL
+LOAD quackscale;  -- join the tailnet, dial, forward, serve
 ```
 
-QuackScale does **not** replace `quack` or `ducklake`. It provides the **network layer** Quack needs on a tailnet.
+QuackScale is the network layer that carries DuckDB's HTTP across a tailnet, from a plain file read to `quack` and `ducklake`.
 
-| Goal | Start here |
-|------|------------|
-| Design reference (patterns, DuckLake, demos) | [docs/GUIDE.md](docs/GUIDE.md) |
-| Tailnet login, Headscale, Quack tokens | [docs/AUTHENTICATION.md](docs/AUTHENTICATION.md) |
-| Two-node proof (Docker Compose) | [examples/README.md](examples/README.md) |
-| DuckLake + tailnet demo | [examples/ducklake/README.md](examples/ducklake/README.md) |
+## Why QuackScale
 
----
+Most teams expose a SQL engine by walling it off. You bind DuckDB or Quack to localhost, where nothing can reach it, or you bind a public IP and defend it with TLS certificates, firewall rules, and a VPN appliance. The database has no identity of its own. It trusts whatever the perimeter lets through.
 
-## Why embedded Tailscale in DuckDB?
+QuackScale inverts that. Each DuckDB process carries its own tailnet identity and speaks WireGuard ([how Tailscale works](https://tailscale.com/blog/how-tailscale-works)) to the peers your control plane already trusts. Nothing listens on the public internet, so you have nothing there to defend.
 
-Traditional setups expose DuckDB/Quack on localhost or bind a public IP and add TLS, firewalls, and VPN appliances around it. QuackScale flips that model: **each DuckDB process carries its own tailnet identity** and speaks WireGuard to peers that your control plane already trusts.
+| | Perimeter model | QuackTail |
+|---|---|---|
+| What listens publicly | A public IP with TLS, firewall, and VPN in front | Nothing public; Quack binds loopback and serves the mesh |
+| What the database trusts | Whatever the perimeter admits | Peers its control plane already trusts |
+| Encryption | TLS you configure and renew | WireGuard between every node |
+| Reaching across networks | Manual port forwarding, VPN appliance | Direct paths or DERP relays |
+| Extra process to run | A VPN daemon or appliance | None; tsnet runs in-process |
 
-| Benefit | What it means for you |
-|---------|------------------------|
-| **WireGuard encryption** | Traffic between tailnet nodes is encrypted end-to-end ([Noise](https://tailscale.com/blog/how-tailscale-works) / WireGuard). Quack HTTP rides inside that mesh — not cleartext on the public internet. |
-| **No public listen by default** | Nodes get tailnet IPs (`100.64.0.0/10`). Quack binds loopback; `tailscale_serve_local` exposes **9494** only on the mesh. Nothing needs a world-routable address. |
-| **Identity-based access** | Tailscale or [Headscale](https://github.com/juanfont/headscale) ACLs decide **which nodes** may open TCP to a peer. Quack tokens decide **which callers** may run SQL — [defense in depth](docs/AUTHENTICATION.md). |
-| **Secure Shared Tokens** | Set `QUACK_TAILNET_TOKEN` once for the fleet. Every server and client on the tailnet uses the same secret for `quack_serve`, `ATTACH`, `quack_query`, and `attach_ducklake` — no per-node random tokens to copy or rotate individually. |
-| **No sidecar VPN** | libtailscale (tsnet) runs in-process. One binary, one lifecycle — ideal for containers, batch jobs, and edge nodes that should not run `tailscaled` separately. |
-| **NAT traversal** | Mesh connectivity works across NATs and regions (direct paths or DERP relays). DuckDB nodes on laptops, cloud VMs, and on-prem can mesh without manual port forwarding. |
-| **Self-hosted or SaaS control plane** | Same SQL API for [Tailscale](https://tailscale.com) and [Headscale](https://headscale.net/) — set `control_url` and a preauth key. |
-| **Manage the tailnet from SQL** | Join, status, ping, forward, serve, and teardown are **`CALL` table functions** — scriptable in migrations, init SQL, and orchestration hooks. |
+Each node clears two independent checks. The tailnet asks whether the machine belongs to your mesh, and Tailscale or [Headscale](https://github.com/juanfont/headscale) ACLs decide which nodes may open a connection. A Quack token then asks whether the caller may run SQL. A stolen token buys nothing from a machine off the mesh, and a machine on the mesh still needs a token. Set `QUACK_TAILNET_TOKEN` once and the whole fleet shares one secret. See [docs/AUTHENTICATION.md](docs/AUTHENTICATION.md).
 
-QuackScale handles **reachability and transport**. Pair it with a fleet-wide `QUACK_TAILNET_TOKEN` so every node on the mesh can reach Quack and DuckLake peers with the same application secret — details in [Quack application auth](docs/AUTHENTICATION.md).
-
----
+You drive all of it from SQL. Joining, status, ping, forward, serve, and teardown are `CALL` table functions, so you keep the network in the same migrations and init scripts as your data. One SQL surface covers Tailscale's hosted control plane and a self-hosted [Headscale](https://headscale.net/): set `control_url` and a preauth key, and nothing else changes.
 
 ## Install
 
-QuackScale ships in two forms: a **loadable extension** (stock DuckDB + `INSTALL`) and a **QuackTail release bundle** (prebuilt `duckdb` binary for Linux CI and compose).
-
-### Loadable extension (GitHub Pages)
-
-Published on each [release](https://github.com/quackscience/duckdb-quackscale/releases) to a DuckDB custom extension repository. Requires **DuckDB v1.5.3** and unsigned extension support:
+QuackScale needs **DuckDB v1.5.3** and unsigned extensions. Install from the custom extension repository:
 
 ```sql
-SET allow_unsigned_extensions = true;
 INSTALL quackscale FROM 'https://quackscience.github.io/duckdb-quackscale';
 LOAD quackscale;
 ```
 
-CLI equivalent: `duckdb -unsigned` then `LOAD quackscale;`
+From the CLI, start `duckdb -unsigned`, then `LOAD quackscale;`.
 
-Install [Quack](https://duckdb.org/docs/current/quack/overview) and [DuckLake](https://duckdb.org/docs/stable/core_extensions/ducklake) from `core_nightly` separately (`INSTALL quack FROM core_nightly; LOAD quack;` and the same for `ducklake`) for `quack_serve`, `ATTACH`, and catalog-over-Quack workloads.
+You also need `quack` (and `ducklake`, for lake workloads) from `core_nightly`:
 
-### QuackTail release bundle (GitHub Releases)
+```sql
+INSTALL quack FROM core_nightly; LOAD quack;
+```
 
-Linux amd64 tarball with `duckdb` and `extension/quackscale/quackscale.duckdb_extension` — used by [Headscale e2e CI](.github/workflows/headscale-e2e.yml) and `examples/` with `BUILD_FROM_SOURCE=0`. Download from [Releases](https://github.com/quackscience/duckdb-quackscale/releases) (`quacktail-linux-amd64-*.tar.gz`).
-
-### Build from source
-
-See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for submodules, Go/libtailscale, and `make release`.
-
----
+Prebuilt QuackTail binary bundles ship on each [release](https://github.com/quackscience/duckdb-quackscale/releases). To build from source, see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
 
 ## Quick start
 
-### Server
+### A server others can reach
 
 ```sh
-export TS_AUTHKEY='tskey-auth-...'
-export QUACK_TAILNET_TOKEN='your-shared-quack-token'
-./build/release/duckdb
+export TS_AUTHKEY='tskey-auth-...'              # Tailscale auth key, or a Headscale preauth key
+export QUACK_TAILNET_TOKEN='your-shared-token'  # one shared secret for the whole fleet
+duckdb -unsigned
 ```
 
 ```sql
@@ -84,141 +67,38 @@ LOAD quack;
 LOAD quackscale;
 
 CALL tailscale_up(
-    hostname => 'my-duckdb-node',
+    hostname  => 'my-duckdb-node',
     state_dir => '~/.local/share/duckdb/quackscale'
 );
 
-CALL quack_serve(
-    'quack:127.0.0.1:9494',
-    allow_other_hostname => true,
-    token => quack_token()
-);
+CALL quack_serve('quack:127.0.0.1:9494', allow_other_hostname => true, token => quack_token());
 CALL tailscale_serve_local(port => 9494);
 
-FROM quack_discover();
+FROM quack_discover();   -- prints this node's quack: URI on the tailnet
 ```
 
-Long-lived servers: persistent `state_dir`, **no** `tailscale_down()`. Headscale: add `control_url` and preauth key — [docs/AUTHENTICATION.md](docs/AUTHENTICATION.md).
+Leave a long-lived server running with a persistent `state_dir`, and do not call `tailscale_down()`. For Headscale, add `control_url` and a preauth key. See [docs/AUTHENTICATION.md](docs/AUTHENTICATION.md).
 
-### Client
+### A client that reaches it
+
+After `tailscale_up`, tailnet `quack:` addresses route over the mesh on their own. Attach the address `quack_discover()` printed on the server, with no forwarder:
 
 ```sql
-LOAD quackscale;
 LOAD quack;
+LOAD quackscale;
 
-CALL tailscale_up(hostname => 'my-client', state_dir => '…', …);
-CALL tailscale_quack_forward(host => 'my-duckdb-node', port => 9494, local_port => 19494);
+CALL tailscale_up(hostname => 'my-client', state_dir => '~/.local/share/duckdb/quackscale-client');
 
-CREATE SECRET (
-    TYPE quack,
-    TOKEN 'your-shared-quack-token',
-    SCOPE 'quack:127.0.0.1:19494'
-);
+CREATE SECRET (TYPE quack, TOKEN 'your-shared-token', SCOPE 'quack:100.x.x.x:9494');
+ATTACH 'quack:100.x.x.x:9494' AS remote (TYPE quack, DISABLE_SSL true);
 
-ATTACH 'quack:127.0.0.1:19494' AS remote (TYPE quack, DISABLE_SSL true);
 FROM remote.query('SELECT 42');
 
 DETACH remote;
-SELECT 'CLIENT_DEMO_DONE' AS status;
-CALL tailscale_down();
+CALL tailscale_down();   -- a one-shot client must close tsnet, or the process hangs
 ```
 
-### DuckLake over the tailnet
-
-Query a **server-owned** DuckLake catalog from a tailnet client. Parquet stays on the server; the client uses `attach_ducklake` to create local views that delegate to the remote lake (same path as the [compose demo](examples/README.md)).
-
-When Parquet lives on the server volume only, use **`attach_ducklake`**. When every reader can reach the same `DATA_PATH` (local disk, NFS, or `s3://`), use DuckDB 1.5.3 **catalog-over-Quack**: `ATTACH 'ducklake:quack:…' AS lake (DATA_PATH '…')` after `CREATE SECRET (TYPE quack, …)` — see [examples/ducklake/local-demo.sql](examples/ducklake/local-demo.sql).
-
-**Server** — attach DuckLake locally, then expose Quack on the mesh:
-
-```sql
-LOAD quack;
-LOAD ducklake;
-LOAD quackscale;
-
-CALL tailscale_up(
-    hostname => 'lake-server',
-    state_dir => '/var/lib/quacktail/lake-server'
-);
-
-ATTACH 'ducklake:/data/lake/metadata/inventory.ducklake' AS lake (
-    DATA_PATH '/data/lake/data/'
-);
-USE lake;
-
-CREATE TABLE IF NOT EXISTS inventory (item_id INTEGER, quantity INTEGER);
-INSERT INTO inventory VALUES (101, 50), (102, 120);
-
-CALL quack_serve(
-    'quack:127.0.0.1:9494',
-    allow_other_hostname => true,
-    token => quack_token()
-);
-CALL tailscale_serve_local(port => 9494);
-```
-
-**Client** — forward Quack over tsnet, then query `lake.inventory` like local tables:
-
-```sql
-LOAD quackscale;
-LOAD quack;
-
-CALL tailscale_up(hostname => 'lake-client', state_dir => '…', …);
-CALL tailscale_quack_forward(
-    host => 'lake-server',
-    port => 9494,
-    local_port => 19494
-);
-CALL tailscale_ping(host => 'lake-server', port => 9494);
-
-CREATE SECRET (
-    TYPE quack,
-    TOKEN 'your-shared-quack-token',
-    SCOPE 'quack:127.0.0.1:19494'
-);
-
-FROM quack_query(
-    'quack:127.0.0.1:19494',
-    'SELECT 1 AS probe',
-    token => 'your-shared-quack-token',
-    disable_ssl => true
-);
-
-CALL attach_ducklake(
-    'quack:127.0.0.1:19494',
-    remote_catalog => 'lake',
-    alias => 'lake',
-    token => 'your-shared-quack-token',
-    disable_ssl => true
-);
-
-SELECT * FROM lake.inventory ORDER BY item_id;
-SELECT 'LAKE_PASSED' AS status, COUNT(*)::INTEGER AS inventory_rows FROM lake.inventory;
-
-SELECT 'CLIENT_DEMO_DONE' AS status;
-CALL tailscale_down();
-```
-
-`attach_ducklake` requires a build that includes it (source or release **≥ v1.0.3**). Without it, use `quack_query(uri, 'SELECT … FROM lake.inventory', …)` — see [docs/GUIDE.md](docs/GUIDE.md).
-
-**Do not** use `SELECT * FROM remote.lake.inventory` — plain `ATTACH 'quack:…' AS remote` exposes the primary catalog only, not nested DuckLake databases.
-
-Run the full two-node proof (Headscale + DuckLake + Quack):
-
-```sh
-cd examples
-docker compose build quacktail-server quacktail-client
-docker compose up -d --force-recreate headscale quacktail-server
-docker compose --profile test run --rm quacktail-client
-```
-
-Expect `LAKE_PASSED`, `PASSED`, and `✓ Demo passed`.
-
-More patterns (shared S3 `DATA_PATH`, hybrid workloads): **[docs/GUIDE.md](docs/GUIDE.md)**.
-
----
-
-## How QuackTail fits together
+## How it fits together
 
 ```mermaid
 flowchart TB
@@ -243,103 +123,20 @@ flowchart TB
     m -->|encrypted TCP| c2
 ```
 
-After `tailscale_up`, QuackScale wraps DuckDB's HTTP layer so requests to tailnet hosts (`100.64.0.0/10`, `*.ts.net`) are dialed over tsnet automatically — clients can **`ATTACH 'quack:100.x.x.x:9494'`** directly, no forwarder. Opt out with `http_route => false`.
+A server joins the tailnet with `tailscale_up`, attaches a DuckLake catalog when it owns one, and serves Quack on loopback through `quack_serve` and `tailscale_serve_local`. Clients reach it over encrypted TCP across the mesh, and no node listens on the public internet.
 
-**`tailscale_quack_forward`** remains for cases the router does not cover: bare MagicDNS **short** names (e.g. `lake-server` without a `.ts.net` suffix), a pinned `127.0.0.1:<port>` endpoint, or non-HTTP consumers. It listens on loopback and dials the server via `tailscale_dial`. Either path feeds **`ATTACH 'quack:…'`** or **`attach_ducklake`**.
+`tailscale_up` wraps DuckDB's HTTP layer. QuackScale then dials any tailnet host you name (`100.64.0.0/10` or `*.ts.net`) over tsnet, so `ATTACH 'quack:100.x:9494'` works on its own. Pass `http_route => false` to turn this off. Three cases fall outside the router: a bare MagicDNS short name, a pinned `127.0.0.1:<port>` endpoint, and a non-HTTP client. For those, `tailscale_quack_forward` listens on loopback and dials the peer. To read a server-owned DuckLake catalog, call `attach_ducklake`. The [guide](docs/GUIDE.md) works through each pattern.
 
-End-to-end recipes and DuckLake patterns: **[docs/GUIDE.md](docs/GUIDE.md)**.
+## Where to next
 
----
-
-## SQL API (`LOAD quackscale`)
-
-Use **`CALL`** for table functions (same style as `CALL quack_serve`). Parameters for `tailscale_up` / `tailscale_login`: `hostname`, `authkey` (or `TS_AUTHKEY` env), `control_url`, `state_dir`, `ephemeral`, `loopback_proxy`, `http_route` (transparent HTTP routing to tailnet hosts — default `true`).
-
-### Tailnet lifecycle
-
-| Command | Purpose |
-|---------|---------|
-| [`CALL tailscale_up(...)`](docs/AUTHENTICATION.md#tailnet-login-tailscale-saas) | Join the tailnet (blocking). Server automation and CI. |
-| [`CALL tailscale_login(...)`](docs/AUTHENTICATION.md#developer-laptop) | Non-blocking join; returns `login_url` for browser auth. |
-| [`CALL tailscale_login_status()`](docs/AUTHENTICATION.md#developer-laptop) | Poll login state (`starting` / `needs_login` / `up` / `error`). |
-| [`CALL tailscale_status()`](docs/GUIDE.md#observability) | Linked?, running, hostname, tailnet IPs. |
-| [`CALL tailscale_down()`](docs/GUIDE.md#standard-client-connection-recipe) | Stop forwarder and close tsnet. **Required** for one-shot clients or the process hangs. |
-
-### Connectivity on the mesh
-
-| Command | Purpose |
-|---------|---------|
-| [`CALL tailscale_serve_local(port => 9494)`](docs/GUIDE.md#use-case-1--remote-duckdb-hub-pattern-a) | Tailscale Serve: tailnet TCP **→** `127.0.0.1:9494`. Run after local `quack_serve`. |
-| [`CALL tailscale_ping(host => 'peer', port => 9494)`](docs/GUIDE.md#observability) | TCP dial to a peer over tsnet — readiness before Quack `ATTACH`. |
-| [`CALL tailscale_quack_forward(host => 'peer', port => 9494)`](docs/GUIDE.md#standard-client-connection-recipe) | Listen on loopback; dial peer for each Quack HTTP connection. Returns `quack_uri`. For MagicDNS short names, pinned local ports, or non-HTTP clients — otherwise `ATTACH 'quack:100.x:9494'` works directly after `tailscale_up`. |
-| [`CALL tailscale_quack_proxy()`](docs/DEVELOPMENT.md) | Legacy SOCKS proxy + `ALL_PROXY` — deprecated; use `tailscale_quack_forward`. |
-| [`CALL tailscale_proxy_status()`](docs/DEVELOPMENT.md) | Legacy SOCKS status. |
-
-### Quack on tailnet (helpers; `LOAD quack` required for serve/attach)
-
-| Function | Purpose |
-|----------|---------|
-| `quack_uri()` | This node’s client-facing `quack:<host>:9494` (MagicDNS or tailnet IP). |
-| `quack_token()` | Shared Quack secret from `QUACK_TAILNET_TOKEN` / `QUACK_TOKEN` env. |
-| [`CALL quack_discover(port => 9494)`](docs/GUIDE.md#finding-peers) | All `quack:` URIs this node advertises on the tailnet. |
-
-Core Quack (`LOAD quack`): `quack_serve`, `quack_stop`, `ATTACH`, `quack_query`, etc.
-
-### Remote DuckLake
-
-| Command | Purpose |
-|---------|---------|
-| [`CALL attach_ducklake(uri, ...)`](docs/GUIDE.md#use-case-2--ducklake-on-the-server-patterns-b--b) | Local views over a remote DuckLake catalog when Parquet lives on the server. |
-
----
-
-## Authentication (two layers)
-
-| Layer | Question | Details |
-|-------|----------|---------|
-| **Tailnet** | Is this machine on our mesh? | [docs/AUTHENTICATION.md — Tailnet login](docs/AUTHENTICATION.md#tailnet-login-tailscale-saas) |
-| **Quack** | May this caller run SQL? | [docs/AUTHENTICATION.md — Quack tokens](docs/AUTHENTICATION.md#quack-http-tokens) |
-
-```sh
-export TS_AUTHKEY='tskey-auth-...'              # or Headscale preauth key
-export QUACK_TAILNET_TOKEN='shared-quack-secret' # same on servers and clients
-```
-
-Do **not** copy the random `auth_token` from each `CALL quack_serve`. Use a fleet-wide shared token or [Quack allowlist](https://duckdb.org/docs/current/quack/security#overriding-authentication).
-
----
-
-## Build
-
-**Prerequisites:** C++17, cmake, make or ninja, Go 1.25+ (CGO; CMake bootstraps Go 1.25.5 if needed), DuckDB with core **`quack`**, git submodules (`duckdb`, `extension-ci-tools`, `third_party/libtailscale`).
-
-```sh
-git clone --recurse-submodules https://github.com/quackscience/duckdb-quackscale.git
-cd duckdb-quackscale
-GEN=ninja make release
-```
-
-- `./build/release/duckdb` — shell with extension  
-- `./build/release/extension/quackscale/quackscale.duckdb_extension` — loadable binary  
-
-Stub build without Tailscale: `make CMAKE_VARS="-DQUACKSCALE_WITH_TAILSCALE=OFF"`.
-
-Docker images (source build + verify): **[examples/README.md](examples/README.md)**.
-
----
-
-## Tests
-
-```sh
-make test
-```
-
-Unit tests need no live tailnet. **E2e (manual):** [`.github/workflows/headscale-e2e.yml`](.github/workflows/headscale-e2e.yml) — release binary, `workflow_dispatch` only. **Local full demo:** [examples/README.md](examples/README.md). **PR smoke:** [headscale-integration.yml](.github/workflows/headscale-integration.yml).
-
----
+| You want to… | Read |
+|--------------|------|
+| Pick a pattern: remote tables, server-owned DuckLake, or shared Parquet | [docs/GUIDE.md](docs/GUIDE.md) |
+| Set up tailnet login, Headscale, and Quack tokens | [docs/AUTHENTICATION.md](docs/AUTHENTICATION.md) |
+| Look up a SQL command and its parameters | [docs/REFERENCE.md](docs/REFERENCE.md) |
+| Run a two-node proof on Docker Compose | [examples/README.md](examples/README.md) |
+| Build the extension, or work on it | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) |
 
 ## License
 
-MIT (extension template). libtailscale is [BSD-3-Clause](https://github.com/tailscale/libtailscale/blob/main/LICENSE).
-
-Based on [duckdb/extension-template](https://github.com/duckdb/extension-template).
+MIT, from the [DuckDB extension template](https://github.com/duckdb/extension-template). libtailscale is [BSD-3-Clause](https://github.com/tailscale/libtailscale/blob/main/LICENSE).

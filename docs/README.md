@@ -6,16 +6,17 @@ QuackTail is **DuckDB + Quack + QuackScale** on a private tailnet (Tailscale or 
 
 | Document | Read when you need to… |
 |----------|-------------------------|
+| **[Why QuackScale](../README.md#why-quackscale)** | Understand why a DuckDB process carries its own tailnet identity, and how the pieces fit |
 | **[GUIDE.md](GUIDE.md)** | Pick a pattern, run use cases, connect clients, query DuckLake, avoid known pitfalls |
 | **[AUTHENTICATION.md](AUTHENTICATION.md)** | Configure tailnet login, Headscale, and Quack HTTP tokens |
+| **[REFERENCE.md](REFERENCE.md)** | Look up a `quackscale` SQL command and its parameters |
 | **[../examples/README.md](../examples/README.md)** | Run the two-node Docker Compose demo |
-| **[../README.md](../README.md)** | Build the extension from source and SQL command reference |
 
 ## Extension developers
 
 | Document | Contents |
 |----------|----------|
-| **[DEVELOPMENT.md](DEVELOPMENT.md)** | Architecture, roadmap, updating DuckDB submodules, CI |
+| **[DEVELOPMENT.md](DEVELOPMENT.md)** | Architecture, roadmap, build from source, updating DuckDB submodules, CI |
 
 ## Quick orientation
 
