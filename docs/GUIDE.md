@@ -9,7 +9,7 @@ QuackTail combines:
 
 QuackScale does **not** replace Quack or DuckLake. It makes them reachable on MagicDNS / `100.x.x.x` without exposing the public internet.
 
-Credentials: [AUTHENTICATION.md](AUTHENTICATION.md). Build and SQL reference: [README.md](../README.md).
+Credentials: [AUTHENTICATION.md](AUTHENTICATION.md). SQL commands: [REFERENCE.md](REFERENCE.md). Build: [DEVELOPMENT.md](DEVELOPMENT.md).
 
 ---
 
