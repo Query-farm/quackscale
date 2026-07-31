@@ -62,7 +62,7 @@ extension-ci-tools/             Extension build makefile submodule
 When bumping the DuckDB target:
 
 1. Update `./duckdb` submodule to the latest stable tag  
-2. Update `./extension-ci-tools` to the branch matching that DuckDB version (e.g. `v1.5.3`)  
+2. Update `./extension-ci-tools` to the branch matching that DuckDB version (e.g. `v1.5.5`)  
 3. Update `duckdb_version` in [MainDistributionPipeline.yml](../.github/workflows/MainDistributionPipeline.yml)  
 4. Rebuild — the DuckDB C++ API is not stable; fix compile breaks using [release notes](https://github.com/duckdb/duckdb/releases) and core extension patches  
 
@@ -83,7 +83,7 @@ When bumping the DuckDB target:
 On **Release published** (or manual **Release** workflow):
 
 1. **build** — extension-ci-tools matrix (`quackscale` per platform, same exclusions as MainDistributionPipeline).
-2. **package-pages** + **deploy-pages** — unsigned `.duckdb_extension.gz` under `v1.5.3/{arch}/` at `https://quackscience.github.io/duckdb-quackscale`.
+2. **package-pages** + **deploy-pages** — unsigned `.duckdb_extension.gz` under `v1.5.5/{arch}/` at `https://quackscience.github.io/duckdb-quackscale`.
 3. **build-quacktail-bundle** — linux amd64 `quacktail-linux-amd64-{tag}.tar.gz` attached to the GitHub Release.
 
 **One-time repo setup:** Settings → Pages → Build and deployment → **Source: GitHub Actions**.

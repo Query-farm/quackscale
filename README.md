@@ -35,7 +35,7 @@ You drive all of it from SQL. Joining, status, ping, forward, serve, and teardow
 
 ## Install
 
-QuackScale needs **DuckDB v1.5.3** and unsigned extensions. Install from the custom extension repository:
+QuackScale needs **DuckDB v1.5.5** and unsigned extensions. Install from the custom extension repository:
 
 ```sql
 INSTALL quackscale FROM community;
