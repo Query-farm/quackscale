@@ -31,7 +31,7 @@ QuackScale inverts that. Each DuckDB process carries its own tailnet identity an
 
 Each node clears two independent checks. The tailnet asks whether the machine belongs to your mesh, and Tailscale or [Headscale](https://github.com/juanfont/headscale) ACLs decide which nodes may open a connection. A Quack token then asks whether the caller may run SQL. A stolen token buys nothing from a machine off the mesh, and a machine on the mesh still needs a token. Set `QUACK_TAILNET_TOKEN` once and the whole fleet shares one secret. See [docs/AUTHENTICATION.md](docs/AUTHENTICATION.md).
 
-You drive all of it from SQL. Joining, status, ping, forward, serve, and teardown are `CALL` table functions, so you keep the network in the same migrations and init scripts as your data. One SQL surface covers Tailscale's hosted control plane and a self-hosted [Headscale](https://headscale.net/): set `control_url` and a preauth key, and nothing else changes.
+You drive all of it from SQL. Joining, status, ping, forward, serve, and teardown are `CALL` table functions, so you keep the network in the same migrations and init scripts as your data. One SQL surface covers Tailscale's hosted control plane, a self-hosted [Headscale](https://headscale.net/), and an in-process [Wirebone](https://github.com/lmangani/wirebone.cpp) coordinator (`CALL quackscale_serve`): set `control_url` and a preauth key, and the client path does not change.
 
 ## Install
 
@@ -77,7 +77,7 @@ CALL tailscale_serve_local(port => 9494);
 FROM quack_discover();   -- prints this node's quack: URI on the tailnet
 ```
 
-Leave a long-lived server running with a persistent `state_dir`, and do not call `tailscale_down()`. For Headscale, add `control_url` and a preauth key. See [docs/AUTHENTICATION.md](docs/AUTHENTICATION.md).
+Leave a long-lived server running with a persistent `state_dir`, and do not call `tailscale_down()`. For Headscale, add `control_url` and a preauth key. To host the control plane in this same process, `CALL quackscale_serve(...)` instead of `tailscale_up`. See [docs/AUTHENTICATION.md](docs/AUTHENTICATION.md).
 
 ### A client that reaches it
 
@@ -125,14 +125,14 @@ flowchart TB
 
 A server joins the tailnet with `tailscale_up`, attaches a DuckLake catalog when it owns one, and serves Quack on loopback through `quack_serve` and `tailscale_serve_local`. Clients reach it over encrypted TCP across the mesh, and no node listens on the public internet.
 
-`tailscale_up` wraps DuckDB's HTTP layer. QuackScale then dials any tailnet host you name (`100.64.0.0/10` or `*.ts.net`) over tsnet, so `ATTACH 'quack:100.x:9494'` works on its own. Pass `http_route => false` to turn this off. Three cases fall outside the router: a bare MagicDNS short name, a pinned `127.0.0.1:<port>` endpoint, and a non-HTTP client. For those, `tailscale_quack_forward` listens on loopback and dials the peer. To read a server-owned DuckLake catalog, call `attach_ducklake`. The [guide](docs/GUIDE.md) works through each pattern.
+`tailscale_up` wraps DuckDB's HTTP layer. QuackScale then dials any tailnet host you name (`100.64.0.0/10`, `*.ts.net`, or `*.wirebone.local`) over tsnet, so `ATTACH 'quack:100.x:9494'` works on its own. Pass `http_route => false` to turn this off. Three cases fall outside the router: a bare MagicDNS short name, a pinned `127.0.0.1:<port>` endpoint, and a non-HTTP client. For those, `tailscale_quack_forward` listens on loopback and dials the peer. To read a server-owned DuckLake catalog, call `attach_ducklake`. The [guide](docs/GUIDE.md) works through each pattern.
 
 ## Where to next
 
 | You want to… | Read |
 |--------------|------|
 | Pick a pattern: remote tables, server-owned DuckLake, or shared Parquet | [docs/GUIDE.md](docs/GUIDE.md) |
-| Set up tailnet login, Headscale, and Quack tokens | [docs/AUTHENTICATION.md](docs/AUTHENTICATION.md) |
+| Set up tailnet login, Headscale, Wirebone, and Quack tokens | [docs/AUTHENTICATION.md](docs/AUTHENTICATION.md) |
 | Look up a SQL command and its parameters | [docs/REFERENCE.md](docs/REFERENCE.md) |
 | Run a two-node proof on Docker Compose | [examples/README.md](examples/README.md) |
 | Build the extension, or work on it | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) |

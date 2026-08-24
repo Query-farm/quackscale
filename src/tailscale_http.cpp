@@ -9,6 +9,7 @@
 #include "duckdb/main/extension_helper.hpp"
 
 #include <cstdlib>
+#include <mutex>
 #include <string>
 
 #ifndef _WIN32
@@ -45,6 +46,33 @@ static void ParseProtoHostPort(const string &proto_host_port, string &host_out, 
 	}
 }
 
+namespace {
+
+std::mutex g_magicdns_suffix_mu;
+vector<string> g_magicdns_suffixes = {".wirebone.local"};
+
+} // namespace
+
+void RegisterTailnetMagicDnsSuffix(const string &suffix) {
+	string s = StringUtil::Lower(suffix);
+	while (!s.empty() && s.back() == '.') {
+		s.pop_back();
+	}
+	if (s.empty()) {
+		return;
+	}
+	if (s.front() != '.') {
+		s = "." + s;
+	}
+	std::lock_guard<std::mutex> g(g_magicdns_suffix_mu);
+	for (auto &existing : g_magicdns_suffixes) {
+		if (existing == s) {
+			return;
+		}
+	}
+	g_magicdns_suffixes.push_back(std::move(s));
+}
+
 bool IsTailnetHost(const string &proto_host_port) {
 	// Only intercept plaintext HTTP (or scheme-less) URLs. We speak plaintext over WireGuard and
 	// never negotiate TLS, so https:// URLs — even to a tailnet host — are left to the delegate
@@ -57,8 +85,17 @@ bool IsTailnetHost(const string &proto_host_port) {
 	if (host.empty()) {
 		return false;
 	}
-	// MagicDNS FQDNs.
-	if (StringUtil::EndsWith(StringUtil::Lower(host), ".ts.net")) {
+	const string host_l = StringUtil::Lower(host);
+	// MagicDNS FQDNs (Tailscale SaaS, Wirebone default, plus any served domain).
+	{
+		std::lock_guard<std::mutex> g(g_magicdns_suffix_mu);
+		for (auto &suffix : g_magicdns_suffixes) {
+			if (StringUtil::EndsWith(host_l, suffix)) {
+				return true;
+			}
+		}
+	}
+	if (StringUtil::EndsWith(host_l, ".ts.net")) {
 		return true;
 	}
 	// IPv4 in the CGNAT range 100.64.0.0/10 (100.64.x.x .. 100.127.x.x).

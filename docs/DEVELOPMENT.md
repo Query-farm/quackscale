@@ -11,6 +11,8 @@ QuackScale does **not** reimplement Quack. It provides tailnet lifecycle SQL, a 
 ```text
 DuckDB + quackscale + libtailscale
   → tailscale_up, tailscale_quack_forward, quack_uri, attach_ducklake
+DuckDB + quackscale + wirebone (optional)
+  → wirebone_serve / quackscale_serve (coordinator + client in one process)
 DuckDB + quack (core)
   → quack_serve, ATTACH, quack_query
 ```
@@ -36,14 +38,21 @@ Disable libtailscale (stub build):
 make CMAKE_VARS="-DQUACKSCALE_WITH_TAILSCALE=OFF"
 ```
 
+Wirebone (in-process coordinator) is enabled automatically on POSIX when `../wirebone.cpp` or `third_party/wirebone` exists and pkg-config can see OpenSSL (`libcrypto`), nghttp2, and libzstd. Coordinator state is stored in DuckDB tables (`wirebone.meta`, `wirebone.preauth_keys`, `wirebone.nodes`) or in an attached DuckLake catalog. Override the source path with `-DQUACKSCALE_WIREBONE_DIR=…`, or force it off:
+
+```sh
+make CMAKE_VARS="-DQUACKSCALE_WITH_WIREBONE=OFF"
+```
+
 Docker Compose images build from source by default — see [examples/Dockerfile](../examples/Dockerfile) and `.dockerignore`.
 
 ## Repository layout
 
 ```text
 cmake/Libtailscale.cmake     Go c-archive build + Go 1.25.5 bootstrap
+cmake/Wirebone.cmake          Optional in-process coordinator (sibling or QUACKSCALE_WIREBONE_DIR)
 third_party/libtailscale/     git submodule
-src/                          C++ extension (bridge, forwarder, attach_ducklake)
+src/                          C++ extension (bridge, forwarder, attach_ducklake, wirebone catalog)
 scripts/e2e/                  Compose entrypoint, bootstrap, verify-image
 examples/                     Docker Compose two-node demo
 duckdb/                       DuckDB submodule
@@ -103,7 +112,7 @@ Each Pages deploy replaces the whole site (one DuckDB version hosted). To host m
 | Headscale + Compose e2e | Done |
 | `ATTACH … TYPE quacktail_lake` (Tier 3 native catalog) | Planned |
 | `ducklake_discover()` enriched discovery | Planned |
-| `quackscale_serve()` one-call server bootstrap | Planned |
+| `quackscale_serve()` one-call coordinator + client | Done (Wirebone; optional build) |
 | Community extension descriptor publish | Done (GitHub Pages on release) |
 
 ## Risks

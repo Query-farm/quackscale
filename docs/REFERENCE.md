@@ -124,6 +124,129 @@ Returns one row:
 
 ---
 
+## In-process coordinator (Wirebone)
+
+A QuackScale build that finds [wirebone.cpp](https://github.com/lmangani/wirebone.cpp) (sibling checkout or `QUACKSCALE_WIREBONE_DIR`) can host the Tailscale/Headscale-compatible control plane **in the same process** as the tsnet client. Peers still call `tailscale_up` with `control_url` and a preauth key; they do not run Wirebone.
+
+`CALL wirebone_status()` reports `linked=false` when the extension was built without Wirebone.
+
+### `wirebone_serve`
+
+```sql
+CALL wirebone_serve(
+    listen     => '0.0.0.0:8080',
+    server_url => 'http://10.0.0.5:8080',
+    domain     => 'wirebone.local'
+);
+SELECT * FROM wirebone.preauth_keys;
+SELECT * FROM wirebone.nodes;
+```
+
+Starts the coordinator on a background thread. State lives in DuckDB tables in the `wirebone` schema of the current database (or an attached DuckLake catalog). The same process can then join as a client with [`tailscale_up`](#tailscale_up) or [`quackscale_serve`](#quackscale_serve).
+
+| Parameter | Type | Default | Meaning |
+|-----------|------|---------|---------|
+| `listen` | VARCHAR | `0.0.0.0:8080` | Bind address for the control plane. |
+| `server_url` | VARCHAR | `http://127.0.0.1:8080` | URL advertised to other nodes. |
+| `backend` | VARCHAR | `duckdb` | `duckdb` (local tables), `ducklake` (shared catalog), or `json` (legacy file). |
+| `catalog` | VARCHAR | current database | Catalog that holds schema `wirebone`. Required for `ducklake`. |
+| `database` | VARCHAR | none | Dedicated `.duckdb` file when you do not want the session database. |
+| `state_path` | VARCHAR | none | JSON file when `backend => 'json'`. |
+| `coordinator_state` | VARCHAR | none | Alias for `state_path`. |
+| `domain` | VARCHAR | `wirebone.local` | MagicDNS suffix (`hostname.domain`). |
+| `dns_listen` | VARCHAR | `0.0.0.0:5353` | UDP MagicDNS listener; empty disables it. |
+
+Tables (same schema on DuckLake): `wirebone.meta`, `wirebone.preauth_keys`, `wirebone.nodes`.
+
+Returns one row: `bound`, `control_url`, `domain`, `preauth_key` (bootstrap key created on first serve).
+
+### `quackscale_serve`
+
+```sql
+CALL quackscale_serve(
+    hostname           => 'duckdb-coord',
+    listen             => '0.0.0.0:8080',
+    server_url         => 'http://10.0.0.5:8080',
+    catalog            => 'memory',
+    state_dir          => '/var/lib/duckdb/tailscale'
+);
+```
+
+One-call coordinator **and** client: starts Wirebone, then `tailscale_up` against `http://127.0.0.1:<bound-port>` using the bootstrap preauth key. Set `join => false` to start only the control plane.
+
+Accepts every [`wirebone_serve`](#wirebone_serve) parameter plus every [`tailscale_up`](#tailscale_up) parameter, and:
+
+| Parameter | Type | Default | Meaning |
+|-----------|------|---------|---------|
+| `join` | BOOLEAN | `true` | Also join the mesh as a tsnet client. |
+
+Returns one row: `bound`, `control_url`, `domain`, `preauth_key`, `running`, `hostname`, `tailnet_ips`.
+
+### `wirebone_status`
+
+```sql
+CALL wirebone_status();
+```
+
+| Column | Type | Meaning |
+|--------|------|---------|
+| `linked` | BOOLEAN | This build embeds Wirebone. |
+| `running` | BOOLEAN | Coordinator thread is up. |
+| `bound` | VARCHAR | Actual listen address, or NULL. |
+| `control_url` | VARCHAR | Advertised URL, or NULL. |
+| `domain` | VARCHAR | MagicDNS domain, or NULL. |
+| `preauth_key` | VARCHAR | Bootstrap key, or NULL. |
+
+### `wirebone_preauth`
+
+```sql
+CALL wirebone_preauth(reusable => true);
+```
+
+Creates an additional preauth key. Requires a running coordinator.
+
+| Parameter | Type | Default | Meaning |
+|-----------|------|---------|---------|
+| `reusable` | BOOLEAN | `true` | Key may be used more than once. |
+| `ephemeral` | BOOLEAN | `false` | Nodes registered with this key are ephemeral. |
+
+Returns `key`, `reusable`, `ephemeral`.
+
+### `wirebone_bootstrap_key`
+
+```sql
+SELECT wirebone_bootstrap_key();
+```
+
+Scalar. Returns the bootstrap preauth key from the running coordinator.
+
+### `wirebone_nodes`
+
+```sql
+CALL wirebone_nodes();
+```
+
+Registered nodes. Empty when the coordinator is not running.
+
+| Column | Type | Meaning |
+|--------|------|---------|
+| `id` | UBIGINT | Numeric node id. |
+| `hostname` | VARCHAR | Node name. |
+| `ipv4` | VARCHAR | Allocated `100.64/10` address. |
+| `ipv6` | VARCHAR | Allocated ULA. |
+| `node_key` | VARCHAR | `nodekey:…` |
+| `online` | BOOLEAN | Recently seen on `/machine/map`. |
+
+### `wirebone_stop`
+
+```sql
+CALL wirebone_stop();
+```
+
+Stops the coordinator thread. Does not call `tailscale_down`. Returns `stopped=true`.
+
+---
+
 ## Connectivity on the mesh
 
 ### `tailscale_serve_local`

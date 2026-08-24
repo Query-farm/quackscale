@@ -94,6 +94,43 @@ CALL tailscale_up(
 
 ---
 
+## Wirebone (in-process control plane)
+
+[Wirebone](https://github.com/lmangani/wirebone.cpp) is a Tailscale/Headscale-compatible coordinator that QuackScale can embed. One DuckDB process hosts the control plane; that same process — and every peer — joins with the existing `tailscale_up` client (libtailscale). No Headscale container and no Tailscale SaaS.
+
+Coordinator + client in one process:
+
+```sql
+LOAD quackscale;
+
+CALL quackscale_serve(
+    hostname          => 'duckdb-coord',
+    listen            => '0.0.0.0:8080',
+    server_url        => 'http://10.0.0.5:8080',
+    state_dir         => '/var/lib/duckdb/tailscale'
+);
+-- coordinator rows: SELECT * FROM wirebone.nodes;
+```
+
+Or two calls: `CALL wirebone_serve(...)` then `CALL tailscale_up(control_url => 'http://127.0.0.1:8080', authkey => wirebone_bootstrap_key(), ...)`.
+
+Peers (client only):
+
+```sql
+CALL tailscale_up(
+    hostname    => 'duckdb-node-b',
+    control_url => 'http://10.0.0.5:8080',
+    authkey     => 'wbkey-…',   -- from the coordinator's wirebone_preauth / bootstrap key
+    state_dir   => '/var/lib/duckdb/tailscale'
+);
+```
+
+Create extra keys with `CALL wirebone_preauth(reusable => true)`. Preauth keys and node IPs persist in the `wirebone` schema of this DuckDB (or `backend => 'ducklake', catalog => 'lake'` for a shared catalog). Use `backend => 'json', state_path => '…'` only if you need the standalone file format.
+
+`CALL wirebone_status()` reports `linked=false` if this binary was built without Wirebone (missing sources or OpenSSL/nghttp2/zstd). See [DEVELOPMENT.md](DEVELOPMENT.md).
+
+---
+
 ## Quack HTTP tokens
 
 After a node is on the tailnet, Quack still requires application-level auth.

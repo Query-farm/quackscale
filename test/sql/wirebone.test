@@ -1,0 +1,85 @@
+# name: test/sql/wirebone.test
+# description: In-process Wirebone coordinator stored in DuckDB tables
+# group: [sql]
+
+require quackscale
+
+# Functions are always registered. Serve needs QUACKSCALE_WITH_WIREBONE=1
+# (sibling ../wirebone.cpp or QUACKSCALE_WIREBONE_DIR).
+query I
+SELECT linked FROM wirebone_status();
+----
+true
+
+statement ok
+CALL wirebone_serve(listen => '127.0.0.1:0', dns_listen => '');
+
+query I
+SELECT running FROM wirebone_status();
+----
+true
+
+query I
+SELECT COUNT(*) >= 1 FROM wirebone.preauth_keys;
+----
+true
+
+query I
+SELECT COUNT(*) FROM wirebone.meta WHERE k = 'snapshot';
+----
+1
+
+statement ok
+CREATE TABLE wirebone_test_keys AS SELECT key FROM wirebone.preauth_keys;
+
+statement ok
+CALL wirebone_preauth(reusable => true);
+
+query I
+SELECT COUNT(*) FROM wirebone.preauth_keys;
+----
+2
+
+statement ok
+CALL wirebone_stop();
+
+query I
+SELECT running FROM wirebone_status();
+----
+false
+
+# Tables survive stop (same DuckDB).
+query I
+SELECT COUNT(*) FROM wirebone.preauth_keys;
+----
+2
+
+statement ok
+CALL wirebone_serve(listen => '127.0.0.1:0', dns_listen => '');
+
+# Reloaded snapshot keeps the same keys.
+query I
+SELECT COUNT(*) FROM wirebone.preauth_keys;
+----
+2
+
+query I
+SELECT COUNT(*) FROM wirebone.preauth_keys k JOIN wirebone_test_keys t USING (key);
+----
+1
+
+statement ok
+CALL wirebone_stop();
+
+statement ok
+DROP TABLE wirebone_test_keys;
+
+statement error
+CALL wirebone_serve(backend => 'ducklake');
+----
+catalog
+
+statement error
+CALL wirebone_serve(backend => 'nope');
+----
+duckdb

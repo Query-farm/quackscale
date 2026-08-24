@@ -2,12 +2,12 @@
 
 QuackTail combines:
 
-1. **Tailscale or Headscale** — private mesh between nodes  
+1. **Tailscale, Headscale, or in-process Wirebone** — private mesh between nodes  
 2. **Quack** — DuckDB’s HTTP protocol (`quack:` URIs, port **9494**)  
 3. **QuackScale** — joins DuckDB to the tailnet and forwards Quack across it  
 4. **DuckLake** (optional) — lakehouse catalog + Parquet on a QuackTail node  
 
-QuackScale does **not** replace Quack or DuckLake. It makes them reachable on MagicDNS / `100.x.x.x` without exposing the public internet.
+QuackScale does **not** replace Quack or DuckLake. It makes them reachable on MagicDNS / `100.x.x.x` without exposing the public internet. When built with Wirebone, one node can be the control plane **and** a mesh client (`CALL quackscale_serve`); other nodes stay client-only (`CALL tailscale_up`).
 
 Credentials: [AUTHENTICATION.md](AUTHENTICATION.md). SQL commands: [REFERENCE.md](REFERENCE.md). Build: [DEVELOPMENT.md](DEVELOPMENT.md).
 
@@ -75,7 +75,7 @@ LOAD quackscale;
 
 CALL tailscale_up(
     hostname => 'my-client',
-    control_url => 'http://headscale:8080',   -- omit for Tailscale SaaS
+    control_url => 'http://headscale:8080',   -- omit for Tailscale SaaS; Wirebone uses the coordinator URL
     authkey => '…',
     state_dir => '/tmp/client-tailscale',
     ephemeral => true

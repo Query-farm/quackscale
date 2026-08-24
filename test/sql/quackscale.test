@@ -70,3 +70,29 @@ statement error
 CALL tailscale_login(not_a_real_param => true);
 ----
 http_route
+
+# Wirebone coordinator SQL is always registered. Live serve/join is e2e-only
+# (needs OpenSSL/nghttp2/zstd and a wirebone.cpp checkout).
+statement ok
+CALL wirebone_status();
+
+statement ok
+CALL wirebone_nodes();
+
+statement ok
+CALL wirebone_stop();
+
+statement error
+SELECT wirebone_bootstrap_key();
+----
+wirebone_serve
+
+statement error
+CALL wirebone_serve(not_a_real_param => true);
+----
+listen
+
+statement error
+CALL quackscale_serve(not_a_real_param => true);
+----
+join
