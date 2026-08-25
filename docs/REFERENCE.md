@@ -184,17 +184,19 @@ CALL quackscale_status();
 ### `quackscale_preauth`
 
 ```sql
-CALL quackscale_preauth(reusable => true);
+CALL quackscale_preauth(reusable => true, token => 'analytics');
 ```
 
-Creates an additional preauth key. Requires a running hub.
+Creates an additional preauth key. Requires a running hub. Nodes that join with the same `token` form one mesh group; the hub (bootstrap / `shared`) is visible to every group. Use the same string as `QUACK_TAILNET_TOKEN` so mesh group and SQL auth match.
 
 | Parameter | Type | Default | Meaning |
 |-----------|------|---------|---------|
 | `reusable` | BOOLEAN | `true` | Key may be used more than once. |
 | `ephemeral` | BOOLEAN | `false` | Nodes registered with this key are ephemeral. |
+| `token` | VARCHAR | empty | Mesh group id. Empty = shared hub plane (legacy). |
+| `shared` | BOOLEAN | true iff `token` is empty | Visible to every group (hub). |
 
-Returns `key`, `reusable`, `ephemeral`.
+Returns `key`, `reusable`, `ephemeral`, `token`, `shared`.
 
 ### `quackscale_nodes`
 
@@ -212,6 +214,8 @@ Registered nodes. Empty when the hub is not running. Prefer `SELECT * FROM quack
 | `ipv6` | VARCHAR | Allocated ULA. |
 | `node_key` | VARCHAR | `nodekey:…` |
 | `online` | BOOLEAN | Recently seen on `/machine/map`. |
+| `token` | VARCHAR | Mesh group, or NULL if untagged / hub plane. |
+| `shared` | BOOLEAN | Visible to every group. |
 
 ### `quackscale_stop`
 

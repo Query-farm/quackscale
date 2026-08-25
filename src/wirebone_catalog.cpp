@@ -61,10 +61,16 @@ void WireboneCatalog::EnsureSchema() {
 	Run("CREATE SCHEMA IF NOT EXISTS " + schema);
 	Run("CREATE TABLE IF NOT EXISTS " + Qualify("meta") + " (k VARCHAR PRIMARY KEY, v VARCHAR)");
 	Run("CREATE TABLE IF NOT EXISTS " + Qualify("preauth_keys") +
-	    " (key VARCHAR PRIMARY KEY, reusable BOOLEAN, ephemeral BOOLEAN, used BOOLEAN, expires_unix BIGINT)");
+	    " (key VARCHAR PRIMARY KEY, reusable BOOLEAN, ephemeral BOOLEAN, used BOOLEAN, expires_unix BIGINT, "
+	    "token VARCHAR, shared BOOLEAN)");
 	Run("CREATE TABLE IF NOT EXISTS " + Qualify("nodes") +
 	    " (id UBIGINT PRIMARY KEY, stable_id VARCHAR, hostname VARCHAR, machine_key VARCHAR, node_key VARCHAR, "
-	    "disco_key VARCHAR, ipv4 VARCHAR, ipv6 VARCHAR, endpoints VARCHAR, online BOOLEAN, ephemeral BOOLEAN)");
+	    "disco_key VARCHAR, ipv4 VARCHAR, ipv6 VARCHAR, endpoints VARCHAR, online BOOLEAN, ephemeral BOOLEAN, "
+	    "token VARCHAR, shared BOOLEAN)");
+	Run("ALTER TABLE " + Qualify("preauth_keys") + " ADD COLUMN IF NOT EXISTS token VARCHAR DEFAULT ''");
+	Run("ALTER TABLE " + Qualify("preauth_keys") + " ADD COLUMN IF NOT EXISTS shared BOOLEAN DEFAULT false");
+	Run("ALTER TABLE " + Qualify("nodes") + " ADD COLUMN IF NOT EXISTS token VARCHAR DEFAULT ''");
+	Run("ALTER TABLE " + Qualify("nodes") + " ADD COLUMN IF NOT EXISTS shared BOOLEAN DEFAULT false");
 
 	// One-cycle alias so older SQL that reads wirebone.* still works.
 	string alias_schema = "wirebone";
@@ -121,7 +127,9 @@ void WireboneCatalog::SaveSnapshot(const string &json) {
 				    string(k.value("reusable", true) ? "true" : "false") + ", " +
 				    string(k.value("ephemeral", false) ? "true" : "false") + ", " +
 				    string(k.value("used", false) ? "true" : "false") + ", " +
-				    std::to_string(k.value("expires_unix", 0)) + ")");
+				    std::to_string(k.value("expires_unix", 0)) + ", '" +
+				    Escape(k.value("token", std::string())) + "', " +
+				    string(k.value("shared", k.value("token", std::string()).empty()) ? "true" : "false") + ")");
 			}
 		}
 		Run("DELETE FROM " + Qualify("nodes"));
@@ -139,7 +147,9 @@ void WireboneCatalog::SaveSnapshot(const string &json) {
 				    Escape(n.value("disco_key", std::string())) + "', '" + Escape(n.value("ipv4", std::string())) +
 				    "', '" + Escape(n.value("ipv6", std::string())) + "', '" + Escape(endpoints) + "', " +
 				    string(n.value("online", false) ? "true" : "false") + ", " +
-				    string(n.value("ephemeral", false) ? "true" : "false") + ")");
+				    string(n.value("ephemeral", false) ? "true" : "false") + ", '" +
+				    Escape(n.value("token", std::string())) + "', " +
+				    string(n.value("shared", n.value("token", std::string()).empty()) ? "true" : "false") + ")");
 			}
 		}
 		Run("COMMIT");

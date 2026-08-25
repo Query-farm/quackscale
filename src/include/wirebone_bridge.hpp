@@ -43,6 +43,8 @@ struct WireboneNodeRow {
 	string ipv6;
 	string node_key;
 	bool online = false;
+	string token;
+	bool shared = false;
 };
 
 //! In-process Tailscale/Headscale-compatible control plane (Wirebone).
@@ -56,7 +58,7 @@ public:
 	WireboneServeStatus Serve(ClientContext &context, const WireboneServeConfig &config);
 	void Stop();
 	string BootstrapKey() const;
-	string CreatePreauthKey(bool reusable, bool ephemeral);
+	string CreatePreauthKey(bool reusable, bool ephemeral, const string &token = string(), int shared = -1);
 	vector<WireboneNodeRow> Nodes() const;
 	//! Loopback control URL for the in-process client (http://127.0.0.1:<port>).
 	string LocalControlURL() const;

@@ -48,6 +48,43 @@ SELECT COUNT(*) FROM quackscale.preauth_keys;
 2
 
 statement ok
+CALL quackscale_preauth(reusable => true, token => 'alpha');
+
+query I
+SELECT token FROM quackscale.preauth_keys WHERE token = 'alpha';
+----
+alpha
+
+query I
+SELECT COUNT(*) FROM quackscale.preauth_keys WHERE token = 'alpha' AND NOT shared;
+----
+1
+
+query I
+SELECT COUNT(*) FROM quackscale.preauth_keys;
+----
+3
+
+# second isolated group
+statement ok
+CALL quackscale_preauth(reusable => true, token => 'beta');
+
+query I
+SELECT token FROM quackscale.preauth_keys WHERE token = 'beta';
+----
+beta
+
+query I
+SELECT COUNT(*) FROM quackscale.preauth_keys WHERE COALESCE(token, '') = '' AND shared;
+----
+2
+
+query I
+SELECT COUNT(*) FROM quackscale.preauth_keys;
+----
+4
+
+statement ok
 CALL quackscale_stop();
 
 query I
@@ -59,16 +96,26 @@ false
 query I
 SELECT COUNT(*) FROM quackscale.preauth_keys;
 ----
-2
+4
 
 statement ok
 CALL quackscale_hub(listen => '127.0.0.1:0', dns_listen => '', join => false);
 
-# Reloaded snapshot keeps the same keys.
+# Reloaded snapshot keeps the same keys and group tags.
 query I
 SELECT COUNT(*) FROM quackscale.preauth_keys;
 ----
-2
+4
+
+query I
+SELECT token FROM quackscale.preauth_keys WHERE token = 'alpha';
+----
+alpha
+
+query I
+SELECT token FROM quackscale.preauth_keys WHERE token = 'beta';
+----
+beta
 
 query I
 SELECT COUNT(*) FROM quackscale.preauth_keys k JOIN hub_test_keys t USING (key);
