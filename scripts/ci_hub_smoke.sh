@@ -45,13 +45,26 @@ copy_logs() {
   cp -f "${COORD_LOG}" "${PEER_LOG}" "${COORD_INIT}" "${LOG_DIR}/" 2>/dev/null || true
 }
 
+# Hub DuckDB is kept alive with an open stdin pipe and may be running tsnet, which
+# ignores SIGTERM. Kill the whole session (TERM then KILL) so CI cannot hang on wait.
+stop_hub() {
+  local pid="${1:-}"
+  [[ -n "${pid}" ]] || return 0
+  kill -TERM -- "-${pid}" 2>/dev/null || kill -TERM "${pid}" 2>/dev/null || true
+  local i
+  for i in 1 2 3 4 5 6 7 8; do
+    kill -0 "${pid}" 2>/dev/null || return 0
+    sleep 0.25
+  done
+  kill -KILL -- "-${pid}" 2>/dev/null || kill -KILL "${pid}" 2>/dev/null || true
+  wait "${pid}" 2>/dev/null || true
+}
+
 cleanup() {
   local code=$?
+  trap - EXIT INT TERM
   copy_logs
-  if [[ -n "${COORD_PID:-}" ]]; then
-    kill "${COORD_PID}" 2>/dev/null || true
-    wait "${COORD_PID}" 2>/dev/null || true
-  fi
+  stop_hub "${COORD_PID:-}"
   rm -rf "${WORK}"
   exit "${code}"
 }
@@ -76,6 +89,7 @@ CALL quackscale_hub(
     listen     => '${LISTEN}',
     server_url => '${URL}',
     dns_listen => '',
+    join       => false,
     state_dir  => '${WORK}/coord-ts'
 );
 COPY (SELECT preauth_key FROM quackscale_status()) TO '${KEY_FILE}' (FORMAT csv, HEADER false);
@@ -83,7 +97,10 @@ SQL
 
 echo "Joining in-process hub from a second DuckDB (control_url=${URL}) ..."
 echo "→ hub ${URL} (state ${WORK})"
-sleep infinity | "${DUCKDB}" -unsigned -bail -batch "${COORD_DB}" -init "${COORD_INIT}" >"${COORD_LOG}" 2>&1 &
+# New session so cleanup can SIGKILL tsnet threads that ignore TERM.
+HUB_DUCKDB="${DUCKDB}" HUB_DB="${COORD_DB}" HUB_INIT="${COORD_INIT}" \
+  setsid sh -c 'sleep infinity | exec "$HUB_DUCKDB" -unsigned -bail -batch "$HUB_DB" -init "$HUB_INIT"' \
+  >"${COORD_LOG}" 2>&1 &
 COORD_PID=$!
 
 ready=0
