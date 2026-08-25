@@ -18,7 +18,7 @@ CALL quackscale_hub(
 
 SELECT * FROM quackscale_status();
 SELECT * FROM quackscale.preauth_keys;
-CALL quackscale_preauth(reusable => true);
+CALL quackscale_preauth(reusable => true, token => 'analytics');
 SELECT * FROM quackscale.nodes;
 
 CALL quack_serve('quack:127.0.0.1:9494', allow_other_hostname => true, token => quack_token());

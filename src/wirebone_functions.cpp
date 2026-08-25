@@ -185,6 +185,8 @@ static void WireboneStopFunction(ClientContext &, TableFunctionInput &data_p, Da
 struct WirebonePreauthBindData : public TableFunctionData {
 	bool reusable = true;
 	bool ephemeral = false;
+	string token;
+	int shared = -1;
 	bool finished = false;
 };
 
@@ -193,8 +195,13 @@ static unique_ptr<FunctionData> WirebonePreauthBind(ClientContext &, TableFuncti
 	auto bind = make_uniq<WirebonePreauthBindData>();
 	bind->reusable = NamedBool(input, "reusable", true);
 	bind->ephemeral = NamedBool(input, "ephemeral", false);
-	return_types = {LogicalType::VARCHAR, LogicalType::BOOLEAN, LogicalType::BOOLEAN};
-	names = {"key", "reusable", "ephemeral"};
+	bind->token = NamedString(input, "token");
+	if (input.named_parameters.find("shared") != input.named_parameters.end()) {
+		bind->shared = NamedBool(input, "shared", false) ? 1 : 0;
+	}
+	return_types = {LogicalType::VARCHAR, LogicalType::BOOLEAN, LogicalType::BOOLEAN, LogicalType::VARCHAR,
+	                LogicalType::BOOLEAN};
+	names = {"key", "reusable", "ephemeral", "token", "shared"};
 	return std::move(bind);
 }
 
@@ -203,11 +210,14 @@ static void WirebonePreauthFunction(ClientContext &, TableFunctionInput &data_p,
 	if (bind.finished) {
 		return;
 	}
-	auto key = WireboneBridge::Get().CreatePreauthKey(bind.reusable, bind.ephemeral);
+	auto key = WireboneBridge::Get().CreatePreauthKey(bind.reusable, bind.ephemeral, bind.token, bind.shared);
+	const bool shared = bind.shared >= 0 ? bind.shared != 0 : bind.token.empty();
 	output.SetCardinality(1);
 	output.SetValue(0, 0, Value(key));
 	output.SetValue(1, 0, Value::BOOLEAN(bind.reusable));
 	output.SetValue(2, 0, Value::BOOLEAN(bind.ephemeral));
+	output.SetValue(3, 0, bind.token.empty() ? Value() : Value(bind.token));
+	output.SetValue(4, 0, Value::BOOLEAN(shared));
 	bind.finished = true;
 }
 
@@ -223,8 +233,8 @@ static unique_ptr<FunctionData> WireboneNodesBind(ClientContext &, TableFunction
 		bind->rows = WireboneBridge::Get().Nodes();
 	}
 	return_types = {LogicalType::UBIGINT, LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR,
-	                LogicalType::VARCHAR, LogicalType::BOOLEAN};
-	names = {"id", "hostname", "ipv4", "ipv6", "node_key", "online"};
+	                LogicalType::VARCHAR, LogicalType::BOOLEAN, LogicalType::VARCHAR, LogicalType::BOOLEAN};
+	names = {"id", "hostname", "ipv4", "ipv6", "node_key", "online", "token", "shared"};
 	return std::move(bind);
 }
 
@@ -242,6 +252,8 @@ static void WireboneNodesFunction(ClientContext &, TableFunctionInput &data_p, D
 		output.SetValue(3, i, row.ipv6.empty() ? Value() : Value(row.ipv6));
 		output.SetValue(4, i, row.node_key.empty() ? Value() : Value(row.node_key));
 		output.SetValue(5, i, Value::BOOLEAN(row.online));
+		output.SetValue(6, i, row.token.empty() ? Value() : Value(row.token));
+		output.SetValue(7, i, Value::BOOLEAN(row.shared));
 	}
 	output.SetCardinality(count);
 	bind.offset += count;
@@ -363,6 +375,8 @@ void RegisterWireboneFunctions(ExtensionLoader &loader) {
 	TableFunction preauth("quackscale_preauth", {}, WirebonePreauthFunction, WirebonePreauthBind);
 	preauth.named_parameters["reusable"] = LogicalType::BOOLEAN;
 	preauth.named_parameters["ephemeral"] = LogicalType::BOOLEAN;
+	preauth.named_parameters["token"] = LogicalType::VARCHAR;
+	preauth.named_parameters["shared"] = LogicalType::BOOLEAN;
 	loader.RegisterFunction(preauth);
 	RegisterTableAlias(loader, preauth, "wirebone_preauth");
 

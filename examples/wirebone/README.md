@@ -57,8 +57,8 @@ CALL quackscale_hub(
 
 SELECT * FROM quackscale_status();
 SELECT * FROM quackscale.preauth_keys;
-CALL quackscale_preauth(reusable => true);
--- copy a wbkey-… into every client session
+CALL quackscale_preauth(reusable => true, token => 'analytics');
+-- copy that wbkey-… into every client that should share this group
 
 CALL quack_serve('quack:127.0.0.1:9494', allow_other_hostname => true, token => quack_token());
 CALL tailscale_serve_local(port => 9494);
