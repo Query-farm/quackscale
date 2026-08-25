@@ -1,13 +1,15 @@
 # Authentication
 
-QuackTail uses **two independent credential layers**. Both matter in production unless you deliberately relax Quack auth on a locked-down tailnet.
+QuackScale uses **two credential layers**. On the in-process hub they can share one secret: mint a preauth key with `token` set to the same string as `QUACK_TAILNET_TOKEN`.
 
 | Layer | Question | Configure with |
 |-------|----------|----------------|
-| **Tailnet** | Is this process on our mesh? | Tailscale / Headscale / hub key → `CALL tailscale_up`, or `CALL quackscale_hub` |
+| **Mesh group** | Which peers can WireGuard to me? | `CALL quackscale_preauth(token => …)` then `authkey` on `tailscale_up` |
 | **Quack** | May this caller run SQL over HTTP? | `QUACK_TAILNET_TOKEN`, `CREATE SECRET`, or custom auth macro |
 
-Tailnet ACLs control **who can open TCP to port 9494**. Quack tokens control **who may execute SQL** once connected. See [Quack security](https://duckdb.org/docs/current/quack/security).
+The hub process is **shared**: every token group can reach it (so `ATTACH` still works). Peers that joined with different `token` values never see each other in the netmap. Untagged keys (no `token`) stay on that shared plane — do not give clients the bootstrap key if you want groups isolated.
+
+On Tailscale SaaS / Headscale the mesh is their ACL model; Quack tokens still gate SQL once connected. See [Quack security](https://duckdb.org/docs/current/quack/security).
 
 The default fleet uses the **in-process hub** ([below](#in-process-hub)): `quackscale_hub` on the server, `tailscale_up` on every client. Tailscale SaaS and Headscale are alternatives with the same client call.
 
@@ -32,7 +34,7 @@ CALL quackscale_hub(
     server_url => 'http://10.0.0.5:8080',
     state_dir  => '/var/lib/duckdb/tailscale'
 );
-CALL quackscale_preauth(reusable => true);
+CALL quackscale_preauth(reusable => true, token => 'analytics');
 SELECT * FROM quackscale.nodes;
 SELECT * FROM quackscale.preauth_keys;
 ```
@@ -43,12 +45,12 @@ Clients (they do not start a hub). Repeat with a distinct `hostname` and `state_
 CALL tailscale_up(
     hostname    => 'analyst-1',
     control_url => 'http://10.0.0.5:8080',
-    authkey     => 'wbkey-…',   -- FROM quackscale.preauth_keys
+    authkey     => 'wbkey-…',   -- FROM quackscale.preauth_keys for this token
     state_dir   => '/var/lib/duckdb/tailscale'
 );
 ```
 
-Create extra keys with `CALL quackscale_preauth(reusable => true)`. Preauth keys and node IPs persist in the `quackscale` schema (or `backend => 'ducklake', catalog => 'lake'`). Use `backend => 'json', state_path => '…'` only for the standalone file format.
+Mint one reusable key per group: `CALL quackscale_preauth(reusable => true, token => 'analytics')`. Use the same string as `QUACK_TAILNET_TOKEN`. Preauth keys and node IPs persist in the `quackscale` schema (or `backend => 'ducklake', catalog => 'lake'`). Use `backend => 'json', state_path => '…'` only for the standalone file format.
 
 `server_url` must be an address **clients can open**. `127.0.0.1` is fine for two processes on one machine; use a LAN or overlay IP for a fleet.
 
@@ -250,7 +252,7 @@ SET GLOBAL quack_authentication_function = 'quacktail_dev_auth';
 
 **Each fleet client**
 
-1. Same `QUACK_TAILNET_TOKEN`; hub clients also need a `wbkey-` from `quackscale.preauth_keys`
+1. Same `QUACK_TAILNET_TOKEN`; hub clients need a `wbkey-` minted with that `token`
 2. `LOAD quackscale; CALL tailscale_up(control_url, authkey, …);`
 3. `LOAD quack; CREATE SECRET ...;` then `ATTACH 'quack:analytics-hub.quackscale.local:9494'`
 4. One-shot jobs: `DETACH …; CALL tailscale_down();` — required or the process hangs
@@ -259,8 +261,10 @@ SET GLOBAL quack_authentication_function = 'quacktail_dev_auth';
 
 ## Security
 
-- Rotate `QUACK_TAILNET_TOKEN` like an API key; update servers and clients together
-- Restrict tailnet ACLs to who may reach peer TCP **9494**
+- Rotate `QUACK_TAILNET_TOKEN` like an API key; mint a matching `quackscale_preauth(token => …)` and update servers and clients together
+- One hub, many groups: different `token` values cannot WireGuard to each other; they can still reach the hub
+- Do not share the hub bootstrap key with clients if you rely on group isolation
+- Restrict who may reach peer TCP **9494** (mesh group + Quack token)
 - `allow_other_hostname => true` is for tailnet binds — do not expose raw Quack on the public internet without TLS in front ([Quack exposure model](https://duckdb.org/docs/current/quack/security#exposure-model))
 
 ## References

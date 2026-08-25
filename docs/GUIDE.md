@@ -128,7 +128,7 @@ CALL quackscale_hub(
 );
 
 SELECT * FROM quackscale.nodes;
-CALL quackscale_preauth(reusable => true);   -- extra keys for the fleet
+CALL quackscale_preauth(reusable => true, token => 'analytics');
 
 CALL quack_serve(
     'quack:127.0.0.1:9494',

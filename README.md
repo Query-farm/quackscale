@@ -65,7 +65,7 @@ CALL quackscale_hub(
     state_dir  => '~/.local/share/duckdb/quackscale'
 );
 
-CALL quackscale_preauth(reusable => true);   -- fleet key; share with every client
+CALL quackscale_preauth(reusable => true, token => 'analytics');  -- fleet group; same string as QUACK_TAILNET_TOKEN
 SELECT * FROM quackscale.preauth_keys;
 SELECT * FROM quackscale.nodes;
 
@@ -76,7 +76,7 @@ CALL tailscale_serve_local(port => 9494);
 FROM quack_discover();
 ```
 
-`server_url` must be reachable from clients (`127.0.0.1` only if they share the host). Copy a `wbkey-…` from `quackscale.preauth_keys`.
+`server_url` must be reachable from clients (`127.0.0.1` only if they share the host). Copy a `wbkey-…` minted with that group's `token`. One hub can serve several groups: a different `token` is a different mesh. Untagged keys stay on the shared hub plane.
 
 ### 2. Join a client
 
