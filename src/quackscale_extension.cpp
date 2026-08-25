@@ -5,6 +5,7 @@
 #include "attach_ducklake.hpp"
 #include "tailscale_bridge.hpp"
 #include "tailscale_http.hpp"
+#include "wirebone_functions.hpp"
 
 #include "duckdb.hpp"
 #include "duckdb/common/exception.hpp"
@@ -568,6 +569,7 @@ static void LoadInternal(ExtensionLoader &loader) {
 	loader.RegisterFunction(ScalarFunction("quack_token", {}, LogicalType::VARCHAR, QuackTokenFunction));
 
 	RegisterAttachDucklakeFunctions(loader);
+	RegisterWireboneFunctions(loader);
 }
 
 } // namespace

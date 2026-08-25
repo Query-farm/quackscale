@@ -38,8 +38,8 @@ The first positional argument, if given, sets `hostname`.
 | Parameter | Type | Default | Meaning |
 |-----------|------|---------|---------|
 | `hostname` | VARCHAR | none | Node name on the tailnet. May also be passed positionally. |
-| `authkey` | VARCHAR | `TS_AUTHKEY` env | Tailscale or Headscale preauth key. |
-| `control_url` | VARCHAR | Tailscale SaaS | Control-plane URL. Set for Headscale. |
+| `authkey` | VARCHAR | `TS_AUTHKEY` env | Tailscale, Headscale, or Wirebone (`wbkey-…`) preauth key. |
+| `control_url` | VARCHAR | Tailscale SaaS | Control-plane URL. Set for Headscale or Wirebone. |
 | `state_dir` | VARCHAR | none | Directory for persisted tailnet identity. |
 | `ephemeral` | BOOLEAN | `false` | Register as an ephemeral node, removed when it disconnects. |
 | `loopback_proxy` | BOOLEAN | `false` | Start the libtailscale loopback SOCKS proxy (used by the deprecated `tailscale_quack_proxy`). |
@@ -121,6 +121,107 @@ Returns one row:
 | Column | Type | Meaning |
 |--------|------|---------|
 | `shutdown_ok` | BOOLEAN | Always `true`. |
+
+---
+
+## In-process hub
+
+A QuackScale build that finds [wirebone.cpp](https://github.com/lmangani/wirebone.cpp) (sibling checkout or `QUACKSCALE_WIREBONE_DIR`) can host the control plane **in this process**. Peers only call [`tailscale_up`](#tailscale_up) with `control_url` and a preauth key.
+
+`CALL quackscale_status()` reports `linked=false` when this binary was built without the hub library.
+
+### `quackscale_hub`
+
+```sql
+CALL quackscale_hub(
+    hostname   => 'coord',
+    listen     => '0.0.0.0:8080',
+    server_url => 'http://10.0.0.5:8080',
+    state_dir  => '/var/lib/duckdb/tailscale'
+);
+SELECT * FROM quackscale.preauth_keys;
+SELECT * FROM quackscale.nodes;
+```
+
+Starts the control plane on a background thread and, by default, joins it as a tsnet client (`tailscale_up` against `http://127.0.0.1:<bound-port>` using the bootstrap key). Set `join => false` for control plane only.
+
+State lives in DuckDB tables in the `quackscale` schema (or an attached DuckLake catalog).
+
+| Parameter | Type | Default | Meaning |
+|-----------|------|---------|---------|
+| `listen` | VARCHAR | `0.0.0.0:8080` | Bind address for the control plane. |
+| `server_url` | VARCHAR | `http://127.0.0.1:8080` | URL advertised to other nodes. |
+| `backend` | VARCHAR | `duckdb` | `duckdb` (local tables), `ducklake` (shared catalog), or `json` (legacy file). |
+| `catalog` | VARCHAR | current database | Catalog that holds schema `quackscale`. Required for `ducklake`. |
+| `database` | VARCHAR | none | Dedicated `.duckdb` file when you do not want the session database. |
+| `state_path` | VARCHAR | none | JSON file when `backend => 'json'`. |
+| `coordinator_state` | VARCHAR | none | Alias for `state_path`. |
+| `domain` | VARCHAR | `quackscale.local` | MagicDNS suffix (`hostname.domain`). |
+| `dns_listen` | VARCHAR | `0.0.0.0:5353` | UDP MagicDNS listener; empty disables it. |
+| `join` | BOOLEAN | `true` | Also join the mesh as a tsnet client. |
+
+Also accepts every [`tailscale_up`](#tailscale_up) parameter (`hostname`, `authkey`, `control_url`, `state_dir`, `ephemeral`, `http_route`, …).
+
+Tables (same schema on DuckLake): `quackscale.meta`, `quackscale.preauth_keys`, `quackscale.nodes`.
+
+Returns one row: `bound`, `control_url`, `domain`, `preauth_key`, `running`, `hostname`, `tailnet_ips`.
+
+### `quackscale_status`
+
+```sql
+CALL quackscale_status();
+```
+
+| Column | Type | Meaning |
+|--------|------|---------|
+| `linked` | BOOLEAN | This build embeds the hub library. |
+| `running` | BOOLEAN | Hub thread is up. |
+| `bound` | VARCHAR | Actual listen address, or NULL. |
+| `control_url` | VARCHAR | Advertised URL, or NULL. |
+| `domain` | VARCHAR | MagicDNS domain, or NULL. |
+| `preauth_key` | VARCHAR | Bootstrap key, or NULL. |
+
+### `quackscale_preauth`
+
+```sql
+CALL quackscale_preauth(reusable => true);
+```
+
+Creates an additional preauth key. Requires a running hub.
+
+| Parameter | Type | Default | Meaning |
+|-----------|------|---------|---------|
+| `reusable` | BOOLEAN | `true` | Key may be used more than once. |
+| `ephemeral` | BOOLEAN | `false` | Nodes registered with this key are ephemeral. |
+
+Returns `key`, `reusable`, `ephemeral`.
+
+### `quackscale_nodes`
+
+```sql
+CALL quackscale_nodes();
+```
+
+Registered nodes. Empty when the hub is not running. Prefer `SELECT * FROM quackscale.nodes` for the persisted roster.
+
+| Column | Type | Meaning |
+|--------|------|---------|
+| `id` | UBIGINT | Numeric node id. |
+| `hostname` | VARCHAR | Node name. |
+| `ipv4` | VARCHAR | Allocated `100.64/10` address. |
+| `ipv6` | VARCHAR | Allocated ULA. |
+| `node_key` | VARCHAR | `nodekey:…` |
+| `online` | BOOLEAN | Recently seen on `/machine/map`. |
+
+### `quackscale_stop`
+
+```sql
+CALL quackscale_stop();
+```
+
+Stops the hub thread. Does not call `tailscale_down`. Returns `stopped=true`.
+
+`quackscale_serve`, `wirebone_serve` (control plane only), `wirebone_status`, `wirebone_preauth`, `wirebone_nodes`, `wirebone_stop`, and `wirebone_bootstrap_key` remain as hidden aliases for one cycle.
 
 ---
 

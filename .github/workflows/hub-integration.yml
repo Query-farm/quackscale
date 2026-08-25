@@ -1,0 +1,80 @@
+# Join QuackScale to an in-process hub (build from source on PR).
+# Analog of headscale-integration.yml: source build + two-process smoke, no Headscale.
+name: Hub integration
+
+on:
+  workflow_dispatch:
+    inputs:
+      wirebone_ref:
+        description: 'lmangani/wirebone.cpp ref to embed as the hub library'
+        required: false
+        default: main
+        type: string
+  pull_request:
+    paths:
+      - '.github/workflows/hub-integration.yml'
+      - 'scripts/ci_hub_smoke.sh'
+      - 'examples/wirebone/**'
+      - 'src/**'
+      - 'cmake/**'
+      - 'third_party/libtailscale/**'
+      - 'test/sql/wirebone.test'
+      - 'test/sql/quackscale.test'
+
+jobs:
+  hub-smoke:
+    name: Hub + QuackScale smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Checkout Wirebone (hub library)
+        uses: actions/checkout@v4
+        with:
+          repository: lmangani/wirebone.cpp
+          path: third_party/wirebone
+          ref: ${{ github.event.inputs.wirebone_ref || 'main' }}
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.5'
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential cmake ninja-build patch ccache curl pkg-config \
+            libssl-dev libnghttp2-dev libzstd-dev
+
+      - name: Build QuackScale
+        run: GEN=ninja make release
+
+      - name: Assert hub is linked
+        run: |
+          chmod +x scripts/ci_hub_smoke.sh
+          ./scripts/ci_hub_smoke.sh --assert-linked
+
+      - name: Hub SQL unit tests
+        working-directory: build/release
+        run: |
+          ./test/unittest test/sql/quackscale.test
+          ./test/unittest test/sql/wirebone.test
+
+      - name: Run hub smoke test
+        run: |
+          chmod +x scripts/ci_hub_smoke.sh
+          ./scripts/ci_hub_smoke.sh
+
+      - name: Upload hub smoke logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hub-smoke-logs
+          path: .e2e-work/hub-smoke/
+          if-no-files-found: warn

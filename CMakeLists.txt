@@ -3,6 +3,7 @@ cmake_minimum_required(VERSION 3.5)
 set(TARGET_NAME quackscale)
 
 option(QUACKSCALE_WITH_TAILSCALE "Embed libtailscale (requires Go)" ON)
+option(QUACKSCALE_WITH_WIREBONE "Embed Wirebone coordinator when sources + deps are available" ON)
 
 set(EXTENSION_NAME ${TARGET_NAME}_extension)
 set(LOADABLE_EXTENSION_NAME ${TARGET_NAME}_loadable_extension)
@@ -14,10 +15,14 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 include_directories(src/include)
 
-set(EXTENSION_SOURCES src/quackscale_extension.cpp src/attach_ducklake.cpp src/tailscale_bridge.cpp src/tailscale_forwarder.cpp src/tailscale_log_capture.cpp src/tailscale_http.cpp)
+set(EXTENSION_SOURCES src/quackscale_extension.cpp src/attach_ducklake.cpp src/tailscale_bridge.cpp src/tailscale_forwarder.cpp src/tailscale_log_capture.cpp src/tailscale_http.cpp src/wirebone_bridge.cpp src/wirebone_functions.cpp src/wirebone_catalog.cpp)
 
 if(QUACKSCALE_WITH_TAILSCALE)
     include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/Libtailscale.cmake)
+endif()
+
+if(QUACKSCALE_WITH_WIREBONE)
+    include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/Wirebone.cmake)
 endif()
 
 build_static_extension(${TARGET_NAME} ${EXTENSION_SOURCES})
@@ -44,6 +49,17 @@ endfunction()
 
 quackscale_link_tailscale(${EXTENSION_NAME})
 quackscale_link_tailscale(${LOADABLE_EXTENSION_NAME})
+
+function(quackscale_link_wirebone_or_stub target_name)
+    if(QUACKSCALE_WITH_WIREBONE AND COMMAND quackscale_link_wirebone)
+        quackscale_link_wirebone(${target_name})
+    else()
+        target_compile_definitions(${target_name} PRIVATE QUACKSCALE_WITH_WIREBONE=0)
+    endif()
+endfunction()
+
+quackscale_link_wirebone_or_stub(${EXTENSION_NAME})
+quackscale_link_wirebone_or_stub(${LOADABLE_EXTENSION_NAME})
 
 install(
     TARGETS ${EXTENSION_NAME}

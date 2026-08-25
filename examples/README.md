@@ -1,6 +1,16 @@
+# QuackTail examples
+
+| Demo | Control plane | Where |
+|------|---------------|--------|
+| **Query fleet (hub)** | In-process hub — start a server, join clients | [wirebone/README.md](wirebone/README.md) |
+| **Docker Compose** | Headscale | this file |
+| **DuckLake on Compose** | Headscale | [ducklake/README.md](ducklake/README.md) |
+
+---
+
 # QuackTail Docker Compose example
 
-Two-node **Headscale + QuackTail** demo on Linux: server joins the tailnet and serves Quack; client `ATTACH`es via `tailscale_quack_forward`.
+Two-node **Headscale + QuackTail** demo on Linux: server joins the tailnet and serves Quack; client `ATTACH`es via `tailscale_quack_forward`. For the default fleet (hub inside DuckDB, no Headscale), start with [wirebone/](wirebone/README.md) and the [README](../README.md#quick-start-a-query-fleet).
 
 **Integration guide:** [docs/GUIDE.md](../docs/GUIDE.md) · **DuckLake demo:** [ducklake/README.md](ducklake/README.md)
 

@@ -1,0 +1,98 @@
+# name: test/sql/wirebone.test
+# description: In-process hub stored in DuckDB tables
+# group: [sql]
+
+require quackscale
+
+# Functions are always registered. Hub needs QUACKSCALE_WITH_WIREBONE=1
+# (sibling ../wirebone.cpp or QUACKSCALE_WIREBONE_DIR).
+query I
+SELECT linked FROM quackscale_status();
+----
+true
+
+# join => false: control plane only (no tsnet). Same as the old wirebone_serve alias.
+statement ok
+CALL quackscale_hub(listen => '127.0.0.1:0', dns_listen => '', join => false);
+
+query I
+SELECT running FROM quackscale_status();
+----
+true
+
+query I
+SELECT COUNT(*) >= 1 FROM quackscale.preauth_keys;
+----
+true
+
+query I
+SELECT COUNT(*) FROM quackscale.meta WHERE k = 'snapshot';
+----
+1
+
+# One-cycle schema alias.
+query I
+SELECT COUNT(*) >= 1 FROM wirebone.preauth_keys;
+----
+true
+
+statement ok
+CREATE TABLE hub_test_keys AS SELECT key FROM quackscale.preauth_keys;
+
+statement ok
+CALL quackscale_preauth(reusable => true);
+
+query I
+SELECT COUNT(*) FROM quackscale.preauth_keys;
+----
+2
+
+statement ok
+CALL quackscale_stop();
+
+query I
+SELECT running FROM quackscale_status();
+----
+false
+
+# Tables survive stop (same DuckDB).
+query I
+SELECT COUNT(*) FROM quackscale.preauth_keys;
+----
+2
+
+statement ok
+CALL quackscale_hub(listen => '127.0.0.1:0', dns_listen => '', join => false);
+
+# Reloaded snapshot keeps the same keys.
+query I
+SELECT COUNT(*) FROM quackscale.preauth_keys;
+----
+2
+
+query I
+SELECT COUNT(*) FROM quackscale.preauth_keys k JOIN hub_test_keys t USING (key);
+----
+1
+
+# Hidden aliases still resolve.
+query I
+SELECT running FROM wirebone_status();
+----
+true
+
+statement ok
+CALL quackscale_stop();
+
+statement ok
+DROP TABLE hub_test_keys;
+
+statement error
+CALL quackscale_hub(backend => 'ducklake', join => false);
+----
+catalog
+
+statement error
+CALL quackscale_hub(backend => 'nope', join => false);
+----
+duckdb

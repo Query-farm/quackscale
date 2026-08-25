@@ -21,6 +21,21 @@ chmod +x scripts/ci_headscale_e2e.sh
 
 Expect `PASSED`, `CLIENT_DEMO_DONE` / `Demo passed`, and `seed-from-server` in client output.
 
+## Hub smoke (source build, PR)
+
+GitHub Actions: [`.github/workflows/hub-integration.yml`](../../.github/workflows/hub-integration.yml)
+
+- **Trigger:** pull_request (and `workflow_dispatch`)
+- **Flow:** checkout [wirebone.cpp](https://github.com/lmangani/wirebone.cpp) into `third_party/wirebone`, `make release`, SQL unit tests, then two DuckDB processes — `quackscale_hub` + `tailscale_up`
+- **Script:** [`scripts/ci_hub_smoke.sh`](../../scripts/ci_hub_smoke.sh) (same as [`examples/wirebone/run.sh`](../../examples/wirebone/run.sh))
+
+```bash
+# after a hub-linked GEN=ninja make release
+./scripts/ci_hub_smoke.sh
+```
+
+Expect `Hub + QuackTail smoke test passed.`
+
 ## Local compose e2e (source build — not CI)
 
 For the full DuckLake + `attach_ducklake` demo (builds DuckDB in Docker):
@@ -37,7 +52,8 @@ Same as [examples/README.md](../../examples/README.md). Use this on a dev machin
 
 | Workflow | Trigger | Builds DuckDB? |
 |----------|---------|----------------|
-| [headscale-integration.yml](../../.github/workflows/headscale-integration.yml) | PR | Yes — smoke test only |
+| [headscale-integration.yml](../../.github/workflows/headscale-integration.yml) | PR | Yes — Headscale smoke |
+| [hub-integration.yml](../../.github/workflows/hub-integration.yml) | PR | Yes — in-process hub smoke |
 | [libtailscale-integration.yml](../../.github/workflows/libtailscale-integration.yml) | PR | Go tests |
 | [MainDistributionPipeline.yml](../../.github/workflows/MainDistributionPipeline.yml) | PR / release | Extension CI |
 
