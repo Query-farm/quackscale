@@ -1,16 +1,18 @@
 # Two-process hub example
 
-One DuckDB process is the mesh hub. A second process joins as a client. No Tailscale account, no Headscale container.
+**Query fleet on one machine:** this DuckDB is the server (hub + Quack). A second process is a fleet client. No Tailscale account, no Headscale.
 
-**Needs:** a hub-linked QuackScale build (`SELECT linked FROM quackscale_status()` is `true`). Check out [wirebone.cpp](https://github.com/lmangani/wirebone.cpp) next to this repo (or set `QUACKSCALE_WIREBONE_DIR`) and rebuild. See [docs/DEVELOPMENT.md](../../docs/DEVELOPMENT.md).
+Same SQL as the README, with `127.0.0.1` so both processes share a host. A third terminal can copy `peer.sql` with a different `hostname` and `state_dir`.
+
+**Needs:** a hub-linked build (`SELECT linked FROM quackscale_status()` is `true`). Check out [wirebone.cpp](https://github.com/lmangani/wirebone.cpp) next to this repo (or set `QUACKSCALE_WIREBONE_DIR`) and rebuild. See [docs/DEVELOPMENT.md](../../docs/DEVELOPMENT.md).
 
 ```
-  hub (this machine)                      peer
-  ──────────────────                      ────
+  fleet server                            fleet clients
+  ────────────                            ─────────────
   CALL quackscale_hub                     CALL tailscale_up(
-       = control plane + tailscale_up       control_url, wbkey-…)
-  quackscale.nodes / preauth_keys
-  optional: quack_serve + serve_local ──► ATTACH quack:coord.quackscale.local:9494
+       = control plane + join               control_url, wbkey-…)
+  quack_serve + serve_local          ──►  ATTACH quack:analytics-hub.quackscale.local:9494
+  quackscale.nodes / preauth_keys         analyst-1, job-etl, …
 ```
 
 SQL reference: [docs/REFERENCE.md](../../docs/REFERENCE.md#in-process-hub). Credentials: [docs/AUTHENTICATION.md](../../docs/AUTHENTICATION.md#in-process-hub).
@@ -33,7 +35,7 @@ Set a shared Quack token if you will serve HTTP:
 export QUACK_TAILNET_TOKEN='your-shared-token'
 ```
 
-**Terminal 1 — hub** (`coordinator.sql`):
+**Terminal 1 — fleet server** (`coordinator.sql`):
 
 ```bash
 ../../build/release/duckdb -unsigned
@@ -46,7 +48,7 @@ LOAD quackscale;
 SELECT linked FROM quackscale_status();   -- must be true
 
 CALL quackscale_hub(
-    hostname   => 'coord',
+    hostname   => 'analytics-hub',
     listen     => '127.0.0.1:18080',
     server_url => 'http://127.0.0.1:18080',
     dns_listen => '',
@@ -55,7 +57,8 @@ CALL quackscale_hub(
 
 SELECT * FROM quackscale_status();
 SELECT * FROM quackscale.preauth_keys;
--- copy the wbkey-… into the peer session
+CALL quackscale_preauth(reusable => true);
+-- copy a wbkey-… into every client session
 
 CALL quack_serve('quack:127.0.0.1:9494', allow_other_hostname => true, token => quack_token());
 CALL tailscale_serve_local(port => 9494);
@@ -64,32 +67,32 @@ FROM quack_discover();
 
 Leave this process running. Do not call `tailscale_down()` or `quackscale_stop()`.
 
-**Terminal 2 — peer** (`peer.sql`):
+**Terminal 2 — fleet client** (`peer.sql`). A third client is the same file with `hostname => 'job-etl'` and a new `state_dir`.
 
 ```sql
 LOAD quack;
 LOAD quackscale;
 
 CALL tailscale_up(
-    hostname    => 'peer',
+    hostname    => 'analyst-1',
     control_url => 'http://127.0.0.1:18080',
     authkey     => 'wbkey-…',
-    state_dir   => '/tmp/quackscale-hub-peer',
+    state_dir   => '/tmp/quackscale-hub-analyst-1',
     ephemeral   => true
 );
 
 FROM tailscale_status();
 
-CREATE SECRET (TYPE quack, TOKEN 'your-shared-token', SCOPE 'quack:coord.quackscale.local:9494');
-ATTACH 'quack:coord.quackscale.local:9494' AS remote (TYPE quack, DISABLE_SSL true);
+CREATE SECRET (TYPE quack, TOKEN 'your-shared-token', SCOPE 'quack:analytics-hub.quackscale.local:9494');
+ATTACH 'quack:analytics-hub.quackscale.local:9494' AS hub (TYPE quack, DISABLE_SSL true);
 
-FROM remote.query('SELECT 42');
+FROM hub.query('SELECT 42');
 
-DETACH remote;
+DETACH hub;
 CALL tailscale_down();
 ```
 
-On the hub, `SELECT * FROM quackscale.nodes` should list both hostnames. If MagicDNS fails, attach the peer to the hub's `100.x` from `quackscale.nodes` or `quack_discover()`, or use `tailscale_quack_forward(host => 'coord', port => 9494)`.
+On the server, `SELECT * FROM quackscale.nodes` should list `analytics-hub` and each client. If MagicDNS fails, attach the `100.x` from `quackscale.nodes` or `quack_discover()`, or use `tailscale_quack_forward(host => 'analytics-hub', port => 9494)`.
 
 ## Roles
 

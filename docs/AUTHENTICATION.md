@@ -9,6 +9,51 @@ QuackTail uses **two independent credential layers**. Both matter in production 
 
 Tailnet ACLs control **who can open TCP to port 9494**. Quack tokens control **who may execute SQL** once connected. See [Quack security](https://duckdb.org/docs/current/quack/security).
 
+The default fleet uses the **in-process hub** ([below](#in-process-hub)): `quackscale_hub` on the server, `tailscale_up` on every client. Tailscale SaaS and Headscale are alternatives with the same client call.
+
+---
+
+## In-process hub
+
+One DuckDB process hosts the control plane and serves SQL. Every other process joins with `tailscale_up`. No Headscale container and no Tailscale SaaS. The library behind the hub is [Wirebone](https://github.com/lmangani/wirebone.cpp); operators do not call it by that name.
+
+| Job | SQL |
+|-----|-----|
+| Fleet server (hub + client) | `CALL quackscale_hub(...)` |
+| Control plane only | `CALL quackscale_hub(..., join => false)` |
+| Fleet client | `CALL tailscale_up(control_url => …, authkey => 'wbkey-…')` |
+
+```sql
+LOAD quackscale;
+
+CALL quackscale_hub(
+    hostname   => 'analytics-hub',
+    listen     => '0.0.0.0:8080',
+    server_url => 'http://10.0.0.5:8080',
+    state_dir  => '/var/lib/duckdb/tailscale'
+);
+CALL quackscale_preauth(reusable => true);
+SELECT * FROM quackscale.nodes;
+SELECT * FROM quackscale.preauth_keys;
+```
+
+Clients (they do not start a hub). Repeat with a distinct `hostname` and `state_dir` per machine:
+
+```sql
+CALL tailscale_up(
+    hostname    => 'analyst-1',
+    control_url => 'http://10.0.0.5:8080',
+    authkey     => 'wbkey-…',   -- FROM quackscale.preauth_keys
+    state_dir   => '/var/lib/duckdb/tailscale'
+);
+```
+
+Create extra keys with `CALL quackscale_preauth(reusable => true)`. Preauth keys and node IPs persist in the `quackscale` schema (or `backend => 'ducklake', catalog => 'lake'`). Use `backend => 'json', state_path => '…'` only for the standalone file format.
+
+`server_url` must be an address **clients can open**. `127.0.0.1` is fine for two processes on one machine; use a LAN or overlay IP for a fleet.
+
+`CALL quackscale_status()` reports `linked=false` if this binary was built without the hub. See [DEVELOPMENT.md](DEVELOPMENT.md). Walkthrough: [examples/wirebone](../examples/wirebone/README.md). SQL: [REFERENCE.md](REFERENCE.md#in-process-hub).
+
 ---
 
 ## Tailnet login (Tailscale SaaS)
@@ -90,49 +135,7 @@ CALL tailscale_up(
 
 **Compose demo:** control URL `http://headscale:8080`, preauth key written to `/work/authkey`. See [examples/README.md](../examples/README.md).
 
-**Notes:** Production `server_url` should be HTTPS. MagicDNS is optional; `quack_uri()` prefers MagicDNS when available, else tailnet IP.
-
----
-
-## In-process hub
-
-One DuckDB process can host the Tailscale/Headscale-compatible control plane. That process — and every peer — joins with `tailscale_up`. No Headscale container and no Tailscale SaaS. The library behind the hub is [Wirebone](https://github.com/lmangani/wirebone.cpp); operators do not call it by that name.
-
-| Job | SQL |
-|-----|-----|
-| This node is the hub (joins by default) | `CALL quackscale_hub(...)` |
-| Hub, control plane only | `CALL quackscale_hub(..., join => false)` |
-| Peer | `CALL tailscale_up(control_url => …, authkey => 'wbkey-…')` |
-
-```sql
-LOAD quackscale;
-
-CALL quackscale_hub(
-    hostname   => 'duckdb-coord',
-    listen     => '0.0.0.0:8080',
-    server_url => 'http://10.0.0.5:8080',
-    state_dir  => '/var/lib/duckdb/tailscale'
-);
-SELECT * FROM quackscale.nodes;
-SELECT * FROM quackscale.preauth_keys;
-```
-
-Peers (client only — they do not start a hub):
-
-```sql
-CALL tailscale_up(
-    hostname    => 'duckdb-node-b',
-    control_url => 'http://10.0.0.5:8080',
-    authkey     => 'wbkey-…',   -- FROM quackscale.preauth_keys / quackscale_preauth
-    state_dir   => '/var/lib/duckdb/tailscale'
-);
-```
-
-Create extra keys with `CALL quackscale_preauth(reusable => true)`. Preauth keys and node IPs persist in the `quackscale` schema of this DuckDB (or `backend => 'ducklake', catalog => 'lake'` for a shared catalog). Use `backend => 'json', state_path => '…'` only if you need the standalone file format.
-
-`server_url` must be an address **peers can open**. `127.0.0.1` is fine for two processes on one machine; use a LAN or overlay IP for a fleet.
-
-`CALL quackscale_status()` reports `linked=false` if this binary was built without the hub (missing sources or OpenSSL/nghttp2/zstd). See [DEVELOPMENT.md](DEVELOPMENT.md). Local walkthrough: [examples/wirebone](../examples/wirebone/README.md). SQL: [REFERENCE.md](REFERENCE.md#in-process-hub).
+**Notes:** Production Headscale `server_url` should be HTTPS. MagicDNS is optional; `quack_uri()` prefers MagicDNS when available, else tailnet IP.
 
 ---
 
@@ -169,7 +172,8 @@ Keep **`TS_AUTHKEY`** separate from Quack tokens.
 LOAD quack;
 LOAD quackscale;
 
-CALL tailscale_up(hostname => 'warehouse-a', state_dir => '…');
+CALL quackscale_hub(hostname => 'warehouse-a', listen => '0.0.0.0:8080',
+    server_url => 'http://10.0.0.5:8080', state_dir => '…');
 
 CALL quack_serve(
     'quack:127.0.0.1:9494',
@@ -179,7 +183,7 @@ CALL quack_serve(
 CALL tailscale_serve_local(port => 9494);
 ```
 
-**Client** (after `tailscale_quack_forward` — see [GUIDE.md](GUIDE.md)):
+**Client** (same `QUACK_TAILNET_TOKEN` as the server):
 
 ```sql
 LOAD quack;
@@ -187,10 +191,10 @@ LOAD quack;
 CREATE SECRET (
     TYPE quack,
     TOKEN 'your-shared-quack-secret',
-    SCOPE 'quack:127.0.0.1:19494'
+    SCOPE 'quack:warehouse-a.quackscale.local:9494'
 );
 
-ATTACH 'quack:127.0.0.1:19494' AS remote (TYPE quack, DISABLE_SSL true);
+ATTACH 'quack:warehouse-a.quackscale.local:9494' AS remote (TYPE quack, DISABLE_SSL true);
 ```
 
 `SCOPE` must match how the client reaches the server. With the forwarder, that is `quack:127.0.0.1:<local_port>`.
@@ -235,21 +239,21 @@ SET GLOBAL quack_authentication_function = 'quacktail_dev_auth';
 
 ## End-to-end checklist
 
-**Each long-lived server**
+**Fleet server (long-lived)**
 
-1. `export TS_AUTHKEY` (or Headscale preauth key) and `export QUACK_TAILNET_TOKEN`
+1. `export QUACK_TAILNET_TOKEN` (and a Tailscale/Headscale key only if you are not using the hub)
 2. `LOAD quack; LOAD quackscale;`
-3. `CALL tailscale_up(...)` with persistent `state_dir`
+3. `CALL quackscale_hub(...)` with persistent `state_dir` (or `CALL tailscale_up` on Tailscale/Headscale)
 4. Optional: `SET GLOBAL quack_authentication_function` (Modes 2–3)
 5. `CALL quack_serve(..., token => quack_token()); CALL tailscale_serve_local(port => 9494);`
-6. Do **not** call `tailscale_down()` on steady-state servers
+6. Do **not** call `tailscale_down()` or `quackscale_stop()` on a steady-state server
 
-**Each one-shot client**
+**Each fleet client**
 
-1. Same `QUACK_TAILNET_TOKEN` available for secrets / `quack_query`
-2. `LOAD quackscale; CALL tailscale_up(...); CALL tailscale_quack_forward(...);`
-3. `LOAD quack; CREATE SECRET ...;` then query / attach
-4. `DETACH remote; SELECT 'done'; CALL tailscale_down();` — required or the process hangs
+1. Same `QUACK_TAILNET_TOKEN`; hub clients also need a `wbkey-` from `quackscale.preauth_keys`
+2. `LOAD quackscale; CALL tailscale_up(control_url, authkey, …);`
+3. `LOAD quack; CREATE SECRET ...;` then `ATTACH 'quack:analytics-hub.quackscale.local:9494'`
+4. One-shot jobs: `DETACH …; CALL tailscale_down();` — required or the process hangs
 
 ---
 

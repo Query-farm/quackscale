@@ -2,12 +2,12 @@
 
 QuackTail combines:
 
-1. **Tailscale, Headscale, or an in-process hub** — private mesh between nodes  
+1. **An in-process hub** (or Tailscale / Headscale) — private mesh between DuckDB processes  
 2. **Quack** — DuckDB’s HTTP protocol (`quack:` URIs, port **9494**)  
-3. **QuackScale** — joins DuckDB to the tailnet and forwards Quack across it  
+3. **QuackScale** — one node hosts the fleet (`quackscale_hub`); the rest join (`tailscale_up`)  
 4. **DuckLake** (optional) — lakehouse catalog + Parquet on a QuackTail node  
 
-QuackScale does **not** replace Quack or DuckLake. It makes them reachable on MagicDNS / `100.x.x.x` without exposing the public internet. One node can host the control plane **and** join it (`CALL quackscale_hub`); other nodes stay client-only (`CALL tailscale_up`).
+QuackScale does **not** replace Quack or DuckLake. It makes them reachable on MagicDNS / `100.x.x.x` without exposing the public internet. The default fleet: one hub, many clients.
 
 Credentials: [AUTHENTICATION.md](AUTHENTICATION.md). SQL commands: [REFERENCE.md](REFERENCE.md). Build: [DEVELOPMENT.md](DEVELOPMENT.md).
 
@@ -17,29 +17,28 @@ Credentials: [AUTHENTICATION.md](AUTHENTICATION.md). SQL commands: [REFERENCE.md
 
 ```text
 ┌─────────────────────────────────────────────────────────────────┐
-│  quacktail-server (long-lived)                                   │
-│  tailscale_up  — or quackscale_hub (control plane + client)      │
-│    → quack_serve(127.0.0.1:9494) → tailscale_serve_local         │
+│  fleet server (long-lived)                                       │
+│  quackscale_hub → quack_serve(127.0.0.1:9494) → serve_local      │
 │  optional: ATTACH ducklake:… AS lake (local or s3:// Parquet)    │
 └───────────────────────────────┬─────────────────────────────────┘
-                                │ tailscale_dial (encrypted)
+                                │ WireGuard (encrypted)
 ┌───────────────────────────────▼─────────────────────────────────┐
-│  quacktail-client (job, laptop, container)                       │
-│  tailscale_up → tailscale_quack_forward → quack:127.0.0.1:19494   │
-│  quack_query / attach_ducklake / ATTACH quack AS remote          │
+│  fleet clients (analyst, job, other DuckDB)                      │
+│  tailscale_up(control_url, wbkey) → ATTACH quack:hub.quackscale.local:9494
+│  quack_query / attach_ducklake / FROM hub.events                 │
 │  tailscale_down() at end of one-shot sessions                      │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-**Choose a control plane first.** Peers always join with `CALL tailscale_up`. Only the hub node calls `quackscale_hub`.
+**Default control plane is the hub.** Peers always join with `CALL tailscale_up`. Only the fleet server calls `quackscale_hub`.
 
-| Control plane | Server join | Peer join |
-|---------------|-------------|-----------|
-| Tailscale SaaS | `tailscale_up` | `tailscale_up` |
+| Control plane | Server | Clients |
+|---------------|--------|---------|
+| **In-process hub (default)** | `quackscale_hub(...)` | `tailscale_up(control_url, authkey => 'wbkey-…', …)` |
 | Headscale | `tailscale_up(control_url, authkey, …)` | Same |
-| In-process hub | `quackscale_hub(...)` | `tailscale_up(control_url, authkey => 'wbkey-…', …)` |
+| Tailscale SaaS | `tailscale_up` | `tailscale_up` |
 
-Hub state is DuckDB tables by default (`quackscale.meta`, `quackscale.preauth_keys`, `quackscale.nodes`). Use `backend => 'ducklake', catalog => 'lake'` when several hubs should share one catalog. Credentials: [AUTHENTICATION.md](AUTHENTICATION.md#in-process-hub). Local walkthrough: [examples/wirebone](../examples/wirebone/README.md).
+Hub state is DuckDB tables by default (`quackscale.meta`, `quackscale.preauth_keys`, `quackscale.nodes`). Use `backend => 'ducklake', catalog => 'lake'` when several hubs should share one catalog. Credentials: [AUTHENTICATION.md](AUTHENTICATION.md#in-process-hub). Fleet walkthrough: [examples/wirebone](../examples/wirebone/README.md).
 
 **Transparent routing (default).** After `tailscale_up` (or `quackscale_hub`), QuackScale wraps DuckDB's HTTP layer so requests to tailnet hosts (`100.64.0.0/10`, `*.ts.net`, `*.quackscale.local`) are dialed over tsnet — `ATTACH 'quack:100.x.x.x:9494'` works with no forwarder. Disable with `tailscale_up(..., http_route => false)`.
 
@@ -79,52 +78,39 @@ Both operational tables + lake on one node?
 
 ## Standard client connection recipe
 
-This sequence is what the [Compose demo](../examples/README.md) proves:
+This sequence is the fleet client. Hub walkthrough: [examples/wirebone](../examples/wirebone/README.md). The Headscale Compose demo uses `tailscale_quack_forward` and `quack:127.0.0.1:19494` instead of MagicDNS.
 
 ```sql
+LOAD quack;
 LOAD quackscale;
 
 CALL tailscale_up(
-    hostname => 'my-client',
-    control_url => 'http://headscale:8080',   -- omit for Tailscale SaaS; hub: the hub's server_url
-    authkey => '…',
+    hostname => 'analyst-1',
+    control_url => 'http://10.0.0.5:8080',
+    authkey => 'wbkey-…',
     state_dir => '/tmp/client-tailscale',
     ephemeral => true
 );
 
-CALL tailscale_quack_forward(
-    host => 'quacktail-server',
-    port => 9494,
-    local_port => 19494
-);
-CALL tailscale_ping(host => 'quacktail-server', port => 9494);  -- optional
-
-LOAD quack;
 CREATE SECRET (
     TYPE quack,
     TOKEN 'your-shared-token',
-    SCOPE 'quack:127.0.0.1:19494'
+    SCOPE 'quack:analytics-hub.quackscale.local:9494'
 );
+ATTACH 'quack:analytics-hub.quackscale.local:9494' AS hub (TYPE quack, DISABLE_SSL true);
 
-FROM quack_query(
-    'quack:127.0.0.1:19494',
-    'SELECT 1 AS probe',
-    token => 'your-shared-token',
-    disable_ssl => true
-);
+FROM hub.query('SELECT 1 AS probe');
+-- Pattern A / B+ / C / D statements here …
 
--- Pattern B+, A, C, or D statements here …
-
-DETACH remote;                              -- if Pattern A used
-SELECT 'CLIENT_DEMO_DONE' AS status;        -- before tailscale_down (compose watchdog)
-CALL tailscale_down();
+DETACH hub;
+CALL tailscale_down();   -- one-shot sessions
 ```
 
 ---
 
-## Use case 0 — Self-hosted hub
+## Use case 0 — Query fleet on the in-process hub
 
-**Story:** One DuckDB process is the mesh hub. Every other node is a client. No Tailscale account, no Headscale container.
+**Story:** One DuckDB is the fleet server (hub + Quack). Analysts, jobs, and other DuckDBs join as clients. No Tailscale account, no Headscale container.
 
 `quackscale_hub` starts the control plane and joins it (`join` defaults to true). Peers only call `tailscale_up`.
 
@@ -191,7 +177,14 @@ If MagicDNS short names fail, use `tailscale_quack_forward(host => 'analytics-hu
 LOAD quack;
 LOAD quackscale;
 
-CALL tailscale_up(hostname => 'analytics-hub', state_dir => '/var/lib/quacktail/hub', …);
+CALL quackscale_hub(
+    hostname   => 'analytics-hub',
+    listen     => '0.0.0.0:8080',
+    server_url => 'http://10.0.0.5:8080',
+    state_dir  => '/var/lib/quacktail/hub'
+);
+-- Or, if this node only joins an existing Tailscale/Headscale mesh:
+-- CALL tailscale_up(hostname => 'analytics-hub', state_dir => '/var/lib/quacktail/hub', …);
 
 CREATE TABLE IF NOT EXISTS events (id INTEGER, payload VARCHAR, ts TIMESTAMP);
 
