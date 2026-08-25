@@ -5,6 +5,30 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DUCKDB="${DUCKDB:-${DUCKDB_BIN:-$ROOT/build/release/duckdb}}"
+
+# DuckDB's default box renderer ends with a border line (└────┘). Always use CSV.
+hub_ci_linked() {
+  local out
+  out="$("${DUCKDB}" :memory: -unsigned -bail -batch -csv -noheader -c \
+    "LOAD quackscale; SELECT linked FROM quackscale_status();")"
+  printf '%s\n' "${out}" | { grep -E '^(true|false)$' || true; } | tail -1 | tr -d '\r'
+}
+
+if [[ "${1:-}" == "--assert-linked" ]]; then
+  if [[ ! -x "${DUCKDB}" ]]; then
+    echo "error: DuckDB not found at ${DUCKDB} (set DUCKDB or DUCKDB_BIN)" >&2
+    exit 1
+  fi
+  linked="$(hub_ci_linked)"
+  echo "quackscale_status.linked=${linked}"
+  if [[ "${linked}" != "true" ]]; then
+    echo "error: this DuckDB was built without the hub" >&2
+    echo "checkout wirebone.cpp into third_party/wirebone (or set QUACKSCALE_WIREBONE_DIR) and rebuild with OpenSSL, nghttp2, and libzstd." >&2
+    exit 1
+  fi
+  exit 0
+fi
+
 LISTEN="${HUB_LISTEN:-127.0.0.1:18080}"
 URL="http://${LISTEN}"
 WORK="$(mktemp -d /tmp/quackscale-hub-XXXXXX)"
@@ -38,7 +62,7 @@ if [[ ! -x "${DUCKDB}" ]]; then
   exit 1
 fi
 
-linked="$("${DUCKDB}" -unsigned -bail -c "LOAD quackscale; SELECT linked FROM quackscale_status();" | tail -1 | tr -d '[:space:]')"
+linked="$(hub_ci_linked)"
 if [[ "${linked}" != "true" ]]; then
   echo "error: this DuckDB was built without the hub (quackscale_status.linked=${linked})" >&2
   echo "checkout wirebone.cpp into third_party/wirebone (or set QUACKSCALE_WIREBONE_DIR) and rebuild with OpenSSL, nghttp2, and libzstd." >&2

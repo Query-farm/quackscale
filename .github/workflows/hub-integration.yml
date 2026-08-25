@@ -57,9 +57,8 @@ jobs:
 
       - name: Assert hub is linked
         run: |
-          linked="$(./build/release/duckdb -unsigned -bail -c "LOAD quackscale; SELECT linked FROM quackscale_status();" | tail -1 | tr -d '[:space:]')"
-          echo "quackscale_status.linked=${linked}"
-          test "${linked}" = "true"
+          chmod +x scripts/ci_hub_smoke.sh
+          ./scripts/ci_hub_smoke.sh --assert-linked
 
       - name: Hub SQL unit tests
         working-directory: build/release
