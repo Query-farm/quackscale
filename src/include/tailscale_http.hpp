@@ -11,13 +11,14 @@ namespace duckdb {
 class DatabaseInstance;
 
 //! True if `proto_host_port` (e.g. "http://100.95.32.19:9494") names a tailnet host:
-//! an IPv4 in the CGNAT range 100.64.0.0/10, a *.ts.net MagicDNS name, *.wirebone.local,
-//! or a suffix registered via RegisterTailnetMagicDnsSuffix. Scheme and :port are stripped
+//! an IPv4 in the CGNAT range 100.64.0.0/10, a *.ts.net MagicDNS name, *.quackscale.local
+//! (and the legacy *.wirebone.local suffix), or a suffix registered via
+//! RegisterTailnetMagicDnsSuffix. Scheme and :port are stripped
 //! before the test. NOTE: bare MagicDNS short names ("lake-server") are NOT matched —
 //! those still need tailscale_quack_forward.
 bool IsTailnetHost(const string &proto_host_port);
 
-//! Extra MagicDNS suffix to treat as a tailnet host (e.g. ".wirebone.local"). Idempotent.
+//! Extra MagicDNS suffix to treat as a tailnet host (e.g. ".quackscale.local"). Idempotent.
 void RegisterTailnetMagicDnsSuffix(const string &suffix);
 
 //! Install TailscaleHTTPUtil as the database's global HTTP util, wrapping whatever util is

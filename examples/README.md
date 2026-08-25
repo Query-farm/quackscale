@@ -1,6 +1,16 @@
+# QuackTail examples
+
+| Demo | Control plane | Where |
+|------|---------------|--------|
+| **Two-process hub** | In-process control plane (no extra daemon) | [wirebone/README.md](wirebone/README.md) |
+| **Docker Compose** | Headscale | this file |
+| **DuckLake on Compose** | Headscale | [ducklake/README.md](ducklake/README.md) |
+
+---
+
 # QuackTail Docker Compose example
 
-Two-node **Headscale + QuackTail** demo on Linux: server joins the tailnet and serves Quack; client `ATTACH`es via `tailscale_quack_forward`.
+Two-node **Headscale + QuackTail** demo on Linux: server joins the tailnet and serves Quack; client `ATTACH`es via `tailscale_quack_forward`. To host the control plane inside DuckDB instead, use [wirebone/](wirebone/README.md) (`CALL quackscale_hub`).
 
 **Integration guide:** [docs/GUIDE.md](../docs/GUIDE.md) · **DuckLake demo:** [ducklake/README.md](ducklake/README.md)
 

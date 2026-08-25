@@ -11,8 +11,8 @@ QuackScale does **not** reimplement Quack. It provides tailnet lifecycle SQL, a 
 ```text
 DuckDB + quackscale + libtailscale
   → tailscale_up, tailscale_quack_forward, quack_uri, attach_ducklake
-DuckDB + quackscale + wirebone (optional)
-  → wirebone_serve / quackscale_serve (coordinator + client in one process)
+DuckDB + quackscale + wirebone (optional hub library)
+  → quackscale_hub (control plane + client in one process)
 DuckDB + quack (core)
   → quack_serve, ATTACH, quack_query
 ```
@@ -38,7 +38,7 @@ Disable libtailscale (stub build):
 make CMAKE_VARS="-DQUACKSCALE_WITH_TAILSCALE=OFF"
 ```
 
-Wirebone (in-process coordinator) is enabled automatically on POSIX when `../wirebone.cpp` or `third_party/wirebone` exists and pkg-config can see OpenSSL (`libcrypto`), nghttp2, and libzstd. Coordinator state is stored in DuckDB tables (`wirebone.meta`, `wirebone.preauth_keys`, `wirebone.nodes`) or in an attached DuckLake catalog. Override the source path with `-DQUACKSCALE_WIREBONE_DIR=…`, or force it off:
+The in-process hub is enabled automatically on POSIX when `../wirebone.cpp` or `third_party/wirebone` exists and pkg-config can see OpenSSL (`libcrypto`), nghttp2, and libzstd. Hub state is stored in DuckDB tables (`quackscale.meta`, `quackscale.preauth_keys`, `quackscale.nodes`) or in an attached DuckLake catalog. Override the source path with `-DQUACKSCALE_WIREBONE_DIR=…`, or force it off:
 
 ```sh
 make CMAKE_VARS="-DQUACKSCALE_WITH_WIREBONE=OFF"
@@ -54,7 +54,7 @@ cmake/Wirebone.cmake          Optional in-process coordinator (sibling or QUACKS
 third_party/libtailscale/     git submodule
 src/                          C++ extension (bridge, forwarder, attach_ducklake, wirebone catalog)
 scripts/e2e/                  Compose entrypoint, bootstrap, verify-image
-examples/                     Docker Compose two-node demo
+examples/                     Headscale Compose demo; examples/wirebone is local coordinator+peer
 duckdb/                       DuckDB submodule
 extension-ci-tools/             Extension build makefile submodule
 ```
@@ -81,11 +81,12 @@ When bumping the DuckDB target:
 |----------|---------|---------|
 | [headscale-e2e.yml](../.github/workflows/headscale-e2e.yml) | **Manual only** | Release-binary two-node e2e (no source build) |
 | [headscale-integration.yml](../.github/workflows/headscale-integration.yml) | PR | Source build + Headscale smoke |
+| [hub-integration.yml](../.github/workflows/hub-integration.yml) | PR | Source build + in-process hub smoke (embeds [wirebone.cpp](https://github.com/lmangani/wirebone.cpp)) |
 | [Release.yml](../.github/workflows/Release.yml) | Release published / manual | Extension repo → GitHub Pages; linux QuackTail tarball → Releases |
 | [libtailscale-integration.yml](../.github/workflows/libtailscale-integration.yml) | PR | libtailscale `go test` |
 | [MainDistributionPipeline.yml](../.github/workflows/MainDistributionPipeline.yml) | PR | Extension distribution CI |
 
-**E2e never runs on push/PR** and never compiles DuckDB in CI — use `workflow_dispatch` on `headscale-e2e` with a release tag. Full DuckLake compose demo is local dev only (`scripts/ci_compose_e2e.sh`).
+**Headscale e2e never runs on push/PR** and never compiles DuckDB in CI — use `workflow_dispatch` on `headscale-e2e` with a release tag. Hub integration **does** compile DuckDB (same as Headscale integration) so it can embed the hub library. Full DuckLake compose demo is local dev only (`scripts/ci_compose_e2e.sh`).
 
 ### Release and GitHub Pages
 
@@ -112,7 +113,7 @@ Each Pages deploy replaces the whole site (one DuckDB version hosted). To host m
 | Headscale + Compose e2e | Done |
 | `ATTACH … TYPE quacktail_lake` (Tier 3 native catalog) | Planned |
 | `ducklake_discover()` enriched discovery | Planned |
-| `quackscale_serve()` one-call coordinator + client | Done (Wirebone; optional build) |
+| `quackscale_hub()` in-process control plane + client | Done (optional Wirebone build) |
 | Community extension descriptor publish | Done (GitHub Pages on release) |
 
 ## Risks
@@ -129,8 +130,14 @@ Each Pages deploy replaces the whole site (one DuckDB version hosted). To host m
 make test
 ```
 
-SQL unit tests do not require a live tailnet. E2e: [test/e2e/README.md](../test/e2e/README.md), [examples/README.md](../examples/README.md).
+SQL unit tests do not require a live tailnet. `test/sql/wirebone.test` needs a hub-linked build (`../wirebone.cpp` or `third_party/wirebone`). Two-process hub smoke (CI):
+
+```sh
+./scripts/ci_hub_smoke.sh
+```
+
+E2e: [test/e2e/README.md](../test/e2e/README.md), [examples/wirebone](../examples/wirebone/README.md), [examples/README.md](../examples/README.md).
 
 ## License
 
-MIT (extension template). libtailscale is [BSD-3-Clause](https://github.com/tailscale/libtailscale/blob/main/LICENSE).
+MIT (extension template). libtailscale is [BSD-3-Clause](https://github.com/tailscale/libtailscale/blob/main/LICENSE). Wirebone is [MIT](https://github.com/lmangani/wirebone.cpp).

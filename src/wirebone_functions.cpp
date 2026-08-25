@@ -249,9 +249,14 @@ static void WireboneNodesFunction(ClientContext &, TableFunctionInput &data_p, D
 
 static void WireboneBootstrapKeyFunction(DataChunk &, ExpressionState &, Vector &result) {
 	if (!WireboneBridge::Get().Linked() || !WireboneBridge::Get().Status().running) {
-		throw InvalidInputException("wirebone_bootstrap_key: CALL wirebone_serve() first");
+		throw InvalidInputException("wirebone_bootstrap_key: CALL quackscale_hub() first");
 	}
 	result.Reference(Value(WireboneBridge::Get().BootstrapKey()));
+}
+
+static void RegisterTableAlias(ExtensionLoader &loader, TableFunction fn, const char *name) {
+	fn.name = name;
+	loader.RegisterFunction(fn);
 }
 
 struct QuackscaleServeBindData : public TableFunctionData {
@@ -326,33 +331,43 @@ static void QuackscaleServeFunction(ClientContext &context, TableFunctionInput &
 } // namespace
 
 void RegisterWireboneFunctions(ExtensionLoader &loader) {
-	TableFunction serve("wirebone_serve", {}, WireboneServeFunction, WireboneServeBind);
-	RegisterServeParameters(serve);
-	loader.RegisterFunction(serve);
+	TableFunction hub("quackscale_hub", {}, QuackscaleServeFunction, QuackscaleServeBind);
+	RegisterServeParameters(hub);
+	hub.named_parameters["hostname"] = LogicalType::VARCHAR;
+	hub.named_parameters["authkey"] = LogicalType::VARCHAR;
+	hub.named_parameters["control_url"] = LogicalType::VARCHAR;
+	hub.named_parameters["state_dir"] = LogicalType::VARCHAR;
+	hub.named_parameters["ephemeral"] = LogicalType::BOOLEAN;
+	hub.named_parameters["loopback_proxy"] = LogicalType::BOOLEAN;
+	hub.named_parameters["http_route"] = LogicalType::BOOLEAN;
+	hub.named_parameters["join"] = LogicalType::BOOLEAN;
+	loader.RegisterFunction(hub);
+	RegisterTableAlias(loader, hub, "quackscale_serve");
 
-	loader.RegisterFunction(TableFunction("wirebone_status", {}, WireboneStatusFunction, WireboneStatusBind));
-	loader.RegisterFunction(TableFunction("wirebone_stop", {}, WireboneStopFunction, WireboneStopBind));
-	loader.RegisterFunction(TableFunction("wirebone_nodes", {}, WireboneNodesFunction, WireboneNodesBind));
+	TableFunction coord_only("wirebone_serve", {}, WireboneServeFunction, WireboneServeBind);
+	RegisterServeParameters(coord_only);
+	loader.RegisterFunction(coord_only);
 
-	TableFunction preauth("wirebone_preauth", {}, WirebonePreauthFunction, WirebonePreauthBind);
+	TableFunction status("quackscale_status", {}, WireboneStatusFunction, WireboneStatusBind);
+	loader.RegisterFunction(status);
+	RegisterTableAlias(loader, status, "wirebone_status");
+
+	TableFunction stop("quackscale_stop", {}, WireboneStopFunction, WireboneStopBind);
+	loader.RegisterFunction(stop);
+	RegisterTableAlias(loader, stop, "wirebone_stop");
+
+	TableFunction nodes("quackscale_nodes", {}, WireboneNodesFunction, WireboneNodesBind);
+	loader.RegisterFunction(nodes);
+	RegisterTableAlias(loader, nodes, "wirebone_nodes");
+
+	TableFunction preauth("quackscale_preauth", {}, WirebonePreauthFunction, WirebonePreauthBind);
 	preauth.named_parameters["reusable"] = LogicalType::BOOLEAN;
 	preauth.named_parameters["ephemeral"] = LogicalType::BOOLEAN;
 	loader.RegisterFunction(preauth);
+	RegisterTableAlias(loader, preauth, "wirebone_preauth");
 
 	loader.RegisterFunction(
 	    ScalarFunction("wirebone_bootstrap_key", {}, LogicalType::VARCHAR, WireboneBootstrapKeyFunction));
-
-	TableFunction both("quackscale_serve", {}, QuackscaleServeFunction, QuackscaleServeBind);
-	RegisterServeParameters(both);
-	both.named_parameters["hostname"] = LogicalType::VARCHAR;
-	both.named_parameters["authkey"] = LogicalType::VARCHAR;
-	both.named_parameters["control_url"] = LogicalType::VARCHAR;
-	both.named_parameters["state_dir"] = LogicalType::VARCHAR;
-	both.named_parameters["ephemeral"] = LogicalType::BOOLEAN;
-	both.named_parameters["loopback_proxy"] = LogicalType::BOOLEAN;
-	both.named_parameters["http_route"] = LogicalType::BOOLEAN;
-	both.named_parameters["join"] = LogicalType::BOOLEAN;
-	loader.RegisterFunction(both);
 }
 
 } // namespace duckdb

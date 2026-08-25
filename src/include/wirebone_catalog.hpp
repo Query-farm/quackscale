@@ -19,7 +19,7 @@ class ClientContext;
 struct WireboneCatalogConfig {
 	//! `duckdb` (default), `ducklake`, or `json`.
 	string backend = "duckdb";
-	//! Catalog that holds the `wirebone` schema. Empty = current database.
+	//! Catalog that holds the `quackscale` schema. Empty = current database.
 	string catalog;
 	//! Optional dedicated DuckDB file (ignored for ducklake / current-db).
 	string database;
@@ -49,7 +49,7 @@ private:
 
 	unique_ptr<DuckDB> owned_db;
 	unique_ptr<Connection> con;
-	string schema = "wirebone";
+	string schema = "quackscale";
 	std::mutex write_mu;
 };
 

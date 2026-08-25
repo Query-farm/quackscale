@@ -38,8 +38,8 @@ The first positional argument, if given, sets `hostname`.
 | Parameter | Type | Default | Meaning |
 |-----------|------|---------|---------|
 | `hostname` | VARCHAR | none | Node name on the tailnet. May also be passed positionally. |
-| `authkey` | VARCHAR | `TS_AUTHKEY` env | Tailscale or Headscale preauth key. |
-| `control_url` | VARCHAR | Tailscale SaaS | Control-plane URL. Set for Headscale. |
+| `authkey` | VARCHAR | `TS_AUTHKEY` env | Tailscale, Headscale, or Wirebone (`wbkey-…`) preauth key. |
+| `control_url` | VARCHAR | Tailscale SaaS | Control-plane URL. Set for Headscale or Wirebone. |
 | `state_dir` | VARCHAR | none | Directory for persisted tailnet identity. |
 | `ephemeral` | BOOLEAN | `false` | Register as an ephemeral node, removed when it disconnects. |
 | `loopback_proxy` | BOOLEAN | `false` | Start the libtailscale loopback SOCKS proxy (used by the deprecated `tailscale_quack_proxy`). |
@@ -124,86 +124,70 @@ Returns one row:
 
 ---
 
-## In-process coordinator (Wirebone)
+## In-process hub
 
-A QuackScale build that finds [wirebone.cpp](https://github.com/lmangani/wirebone.cpp) (sibling checkout or `QUACKSCALE_WIREBONE_DIR`) can host the Tailscale/Headscale-compatible control plane **in the same process** as the tsnet client. Peers still call `tailscale_up` with `control_url` and a preauth key; they do not run Wirebone.
+A QuackScale build that finds [wirebone.cpp](https://github.com/lmangani/wirebone.cpp) (sibling checkout or `QUACKSCALE_WIREBONE_DIR`) can host the control plane **in this process**. Peers only call [`tailscale_up`](#tailscale_up) with `control_url` and a preauth key.
 
-`CALL wirebone_status()` reports `linked=false` when the extension was built without Wirebone.
+`CALL quackscale_status()` reports `linked=false` when this binary was built without the hub library.
 
-### `wirebone_serve`
+### `quackscale_hub`
 
 ```sql
-CALL wirebone_serve(
+CALL quackscale_hub(
+    hostname   => 'coord',
     listen     => '0.0.0.0:8080',
     server_url => 'http://10.0.0.5:8080',
-    domain     => 'wirebone.local'
+    state_dir  => '/var/lib/duckdb/tailscale'
 );
-SELECT * FROM wirebone.preauth_keys;
-SELECT * FROM wirebone.nodes;
+SELECT * FROM quackscale.preauth_keys;
+SELECT * FROM quackscale.nodes;
 ```
 
-Starts the coordinator on a background thread. State lives in DuckDB tables in the `wirebone` schema of the current database (or an attached DuckLake catalog). The same process can then join as a client with [`tailscale_up`](#tailscale_up) or [`quackscale_serve`](#quackscale_serve).
+Starts the control plane on a background thread and, by default, joins it as a tsnet client (`tailscale_up` against `http://127.0.0.1:<bound-port>` using the bootstrap key). Set `join => false` for control plane only.
+
+State lives in DuckDB tables in the `quackscale` schema (or an attached DuckLake catalog).
 
 | Parameter | Type | Default | Meaning |
 |-----------|------|---------|---------|
 | `listen` | VARCHAR | `0.0.0.0:8080` | Bind address for the control plane. |
 | `server_url` | VARCHAR | `http://127.0.0.1:8080` | URL advertised to other nodes. |
 | `backend` | VARCHAR | `duckdb` | `duckdb` (local tables), `ducklake` (shared catalog), or `json` (legacy file). |
-| `catalog` | VARCHAR | current database | Catalog that holds schema `wirebone`. Required for `ducklake`. |
+| `catalog` | VARCHAR | current database | Catalog that holds schema `quackscale`. Required for `ducklake`. |
 | `database` | VARCHAR | none | Dedicated `.duckdb` file when you do not want the session database. |
 | `state_path` | VARCHAR | none | JSON file when `backend => 'json'`. |
 | `coordinator_state` | VARCHAR | none | Alias for `state_path`. |
-| `domain` | VARCHAR | `wirebone.local` | MagicDNS suffix (`hostname.domain`). |
+| `domain` | VARCHAR | `quackscale.local` | MagicDNS suffix (`hostname.domain`). |
 | `dns_listen` | VARCHAR | `0.0.0.0:5353` | UDP MagicDNS listener; empty disables it. |
-
-Tables (same schema on DuckLake): `wirebone.meta`, `wirebone.preauth_keys`, `wirebone.nodes`.
-
-Returns one row: `bound`, `control_url`, `domain`, `preauth_key` (bootstrap key created on first serve).
-
-### `quackscale_serve`
-
-```sql
-CALL quackscale_serve(
-    hostname           => 'duckdb-coord',
-    listen             => '0.0.0.0:8080',
-    server_url         => 'http://10.0.0.5:8080',
-    catalog            => 'memory',
-    state_dir          => '/var/lib/duckdb/tailscale'
-);
-```
-
-One-call coordinator **and** client: starts Wirebone, then `tailscale_up` against `http://127.0.0.1:<bound-port>` using the bootstrap preauth key. Set `join => false` to start only the control plane.
-
-Accepts every [`wirebone_serve`](#wirebone_serve) parameter plus every [`tailscale_up`](#tailscale_up) parameter, and:
-
-| Parameter | Type | Default | Meaning |
-|-----------|------|---------|---------|
 | `join` | BOOLEAN | `true` | Also join the mesh as a tsnet client. |
+
+Also accepts every [`tailscale_up`](#tailscale_up) parameter (`hostname`, `authkey`, `control_url`, `state_dir`, `ephemeral`, `http_route`, …).
+
+Tables (same schema on DuckLake): `quackscale.meta`, `quackscale.preauth_keys`, `quackscale.nodes`.
 
 Returns one row: `bound`, `control_url`, `domain`, `preauth_key`, `running`, `hostname`, `tailnet_ips`.
 
-### `wirebone_status`
+### `quackscale_status`
 
 ```sql
-CALL wirebone_status();
+CALL quackscale_status();
 ```
 
 | Column | Type | Meaning |
 |--------|------|---------|
-| `linked` | BOOLEAN | This build embeds Wirebone. |
-| `running` | BOOLEAN | Coordinator thread is up. |
+| `linked` | BOOLEAN | This build embeds the hub library. |
+| `running` | BOOLEAN | Hub thread is up. |
 | `bound` | VARCHAR | Actual listen address, or NULL. |
 | `control_url` | VARCHAR | Advertised URL, or NULL. |
 | `domain` | VARCHAR | MagicDNS domain, or NULL. |
 | `preauth_key` | VARCHAR | Bootstrap key, or NULL. |
 
-### `wirebone_preauth`
+### `quackscale_preauth`
 
 ```sql
-CALL wirebone_preauth(reusable => true);
+CALL quackscale_preauth(reusable => true);
 ```
 
-Creates an additional preauth key. Requires a running coordinator.
+Creates an additional preauth key. Requires a running hub.
 
 | Parameter | Type | Default | Meaning |
 |-----------|------|---------|---------|
@@ -212,21 +196,13 @@ Creates an additional preauth key. Requires a running coordinator.
 
 Returns `key`, `reusable`, `ephemeral`.
 
-### `wirebone_bootstrap_key`
+### `quackscale_nodes`
 
 ```sql
-SELECT wirebone_bootstrap_key();
+CALL quackscale_nodes();
 ```
 
-Scalar. Returns the bootstrap preauth key from the running coordinator.
-
-### `wirebone_nodes`
-
-```sql
-CALL wirebone_nodes();
-```
-
-Registered nodes. Empty when the coordinator is not running.
+Registered nodes. Empty when the hub is not running. Prefer `SELECT * FROM quackscale.nodes` for the persisted roster.
 
 | Column | Type | Meaning |
 |--------|------|---------|
@@ -237,13 +213,15 @@ Registered nodes. Empty when the coordinator is not running.
 | `node_key` | VARCHAR | `nodekey:…` |
 | `online` | BOOLEAN | Recently seen on `/machine/map`. |
 
-### `wirebone_stop`
+### `quackscale_stop`
 
 ```sql
-CALL wirebone_stop();
+CALL quackscale_stop();
 ```
 
-Stops the coordinator thread. Does not call `tailscale_down`. Returns `stopped=true`.
+Stops the hub thread. Does not call `tailscale_down`. Returns `stopped=true`.
+
+`quackscale_serve`, `wirebone_serve` (control plane only), `wirebone_status`, `wirebone_preauth`, `wirebone_nodes`, `wirebone_stop`, and `wirebone_bootstrap_key` remain as hidden aliases for one cycle.
 
 ---
 

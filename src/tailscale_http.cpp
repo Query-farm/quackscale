@@ -49,7 +49,7 @@ static void ParseProtoHostPort(const string &proto_host_port, string &host_out, 
 namespace {
 
 std::mutex g_magicdns_suffix_mu;
-vector<string> g_magicdns_suffixes = {".wirebone.local"};
+vector<string> g_magicdns_suffixes = {".quackscale.local", ".wirebone.local"};
 
 } // namespace
 
@@ -86,7 +86,7 @@ bool IsTailnetHost(const string &proto_host_port) {
 		return false;
 	}
 	const string host_l = StringUtil::Lower(host);
-	// MagicDNS FQDNs (Tailscale SaaS, Wirebone default, plus any served domain).
+	// MagicDNS FQDNs (Tailscale SaaS, in-process hub, plus any served domain).
 	{
 		std::lock_guard<std::mutex> g(g_magicdns_suffix_mu);
 		for (auto &suffix : g_magicdns_suffixes) {

@@ -71,21 +71,30 @@ CALL tailscale_login(not_a_real_param => true);
 ----
 http_route
 
-# Wirebone coordinator SQL is always registered. Live serve/join is e2e-only
+# Hub SQL is always registered. Live hub/join is e2e-only
 # (needs OpenSSL/nghttp2/zstd and a wirebone.cpp checkout).
 statement ok
-CALL wirebone_status();
+CALL quackscale_status();
 
 statement ok
-CALL wirebone_nodes();
+CALL quackscale_nodes();
 
 statement ok
-CALL wirebone_stop();
+CALL quackscale_stop();
 
 statement error
 SELECT wirebone_bootstrap_key();
 ----
-wirebone_serve
+quackscale_hub
+
+statement error
+CALL quackscale_hub(not_a_real_param => true);
+----
+join
+
+# Hidden aliases still resolve.
+statement ok
+CALL wirebone_status();
 
 statement error
 CALL wirebone_serve(not_a_real_param => true);

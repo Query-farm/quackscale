@@ -19,7 +19,7 @@ struct WireboneServeConfig {
 	string listen = "0.0.0.0:8080";
 	string server_url = "http://127.0.0.1:8080";
 	string state_path;
-	string domain = "wirebone.local";
+	string domain = "quackscale.local";
 	string dns_listen = "0.0.0.0:5353";
 	//! `duckdb` (default), `ducklake`, or `json`.
 	string backend = "duckdb";

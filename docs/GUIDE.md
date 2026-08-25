@@ -2,12 +2,12 @@
 
 QuackTail combines:
 
-1. **Tailscale, Headscale, or in-process Wirebone** — private mesh between nodes  
+1. **Tailscale, Headscale, or an in-process hub** — private mesh between nodes  
 2. **Quack** — DuckDB’s HTTP protocol (`quack:` URIs, port **9494**)  
 3. **QuackScale** — joins DuckDB to the tailnet and forwards Quack across it  
 4. **DuckLake** (optional) — lakehouse catalog + Parquet on a QuackTail node  
 
-QuackScale does **not** replace Quack or DuckLake. It makes them reachable on MagicDNS / `100.x.x.x` without exposing the public internet. When built with Wirebone, one node can be the control plane **and** a mesh client (`CALL quackscale_serve`); other nodes stay client-only (`CALL tailscale_up`).
+QuackScale does **not** replace Quack or DuckLake. It makes them reachable on MagicDNS / `100.x.x.x` without exposing the public internet. One node can host the control plane **and** join it (`CALL quackscale_hub`); other nodes stay client-only (`CALL tailscale_up`).
 
 Credentials: [AUTHENTICATION.md](AUTHENTICATION.md). SQL commands: [REFERENCE.md](REFERENCE.md). Build: [DEVELOPMENT.md](DEVELOPMENT.md).
 
@@ -18,7 +18,8 @@ Credentials: [AUTHENTICATION.md](AUTHENTICATION.md). SQL commands: [REFERENCE.md
 ```text
 ┌─────────────────────────────────────────────────────────────────┐
 │  quacktail-server (long-lived)                                   │
-│  tailscale_up → quack_serve(127.0.0.1:9494) → tailscale_serve_local
+│  tailscale_up  — or quackscale_hub (control plane + client)      │
+│    → quack_serve(127.0.0.1:9494) → tailscale_serve_local         │
 │  optional: ATTACH ducklake:… AS lake (local or s3:// Parquet)    │
 └───────────────────────────────┬─────────────────────────────────┘
                                 │ tailscale_dial (encrypted)
@@ -30,9 +31,19 @@ Credentials: [AUTHENTICATION.md](AUTHENTICATION.md). SQL commands: [REFERENCE.md
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-**Transparent routing (default).** After `tailscale_up`, QuackScale wraps DuckDB's HTTP layer so requests to tailnet hosts (`100.64.0.0/10`, `*.ts.net`) are dialed over tsnet — `ATTACH 'quack:100.x.x.x:9494'` works with no forwarder. Disable with `tailscale_up(..., http_route => false)`.
+**Choose a control plane first.** Peers always join with `CALL tailscale_up`. Only the hub node calls `quackscale_hub`.
 
-**Why `tailscale_quack_forward`?** It covers what the router does not: bare MagicDNS **short** names (no `.ts.net` suffix), a pinned `127.0.0.1:<port>` endpoint, or non-HTTP clients. It listens on loopback and dials the peer via `tailscale_dial`. The compose demo uses it (stable hostnames) and also probes the direct-router path.
+| Control plane | Server join | Peer join |
+|---------------|-------------|-----------|
+| Tailscale SaaS | `tailscale_up` | `tailscale_up` |
+| Headscale | `tailscale_up(control_url, authkey, …)` | Same |
+| In-process hub | `quackscale_hub(...)` | `tailscale_up(control_url, authkey => 'wbkey-…', …)` |
+
+Hub state is DuckDB tables by default (`quackscale.meta`, `quackscale.preauth_keys`, `quackscale.nodes`). Use `backend => 'ducklake', catalog => 'lake'` when several hubs should share one catalog. Credentials: [AUTHENTICATION.md](AUTHENTICATION.md#in-process-hub). Local walkthrough: [examples/wirebone](../examples/wirebone/README.md).
+
+**Transparent routing (default).** After `tailscale_up` (or `quackscale_hub`), QuackScale wraps DuckDB's HTTP layer so requests to tailnet hosts (`100.64.0.0/10`, `*.ts.net`, `*.quackscale.local`) are dialed over tsnet — `ATTACH 'quack:100.x.x.x:9494'` works with no forwarder. Disable with `tailscale_up(..., http_route => false)`.
+
+**Why `tailscale_quack_forward`?** It covers what the router does not: bare MagicDNS **short** names (no `.ts.net` / `.quackscale.local` suffix), a pinned `127.0.0.1:<port>` endpoint, or non-HTTP clients. It listens on loopback and dials the peer via `tailscale_dial`. The compose demo uses it (stable hostnames) and also probes the direct-router path.
 
 **Why `tailscale_down`?** `tailscale_up` and the forwarder start background threads. One-shot DuckDB processes **hang after SQL finishes** unless tsnet is shut down.
 
@@ -75,7 +86,7 @@ LOAD quackscale;
 
 CALL tailscale_up(
     hostname => 'my-client',
-    control_url => 'http://headscale:8080',   -- omit for Tailscale SaaS; Wirebone uses the coordinator URL
+    control_url => 'http://headscale:8080',   -- omit for Tailscale SaaS; hub: the hub's server_url
     authkey => '…',
     state_dir => '/tmp/client-tailscale',
     ephemeral => true
@@ -108,6 +119,65 @@ DETACH remote;                              -- if Pattern A used
 SELECT 'CLIENT_DEMO_DONE' AS status;        -- before tailscale_down (compose watchdog)
 CALL tailscale_down();
 ```
+
+---
+
+## Use case 0 — Self-hosted hub
+
+**Story:** One DuckDB process is the mesh hub. Every other node is a client. No Tailscale account, no Headscale container.
+
+`quackscale_hub` starts the control plane and joins it (`join` defaults to true). Peers only call `tailscale_up`.
+
+### Hub (long-lived)
+
+```sql
+LOAD quack;
+LOAD quackscale;
+
+CALL quackscale_hub(
+    hostname   => 'analytics-hub',
+    listen     => '0.0.0.0:8080',
+    server_url => 'http://10.0.0.5:8080',   -- address peers can reach
+    state_dir  => '/var/lib/quacktail/hub'
+);
+
+SELECT * FROM quackscale.nodes;
+CALL quackscale_preauth(reusable => true);   -- extra keys for the fleet
+
+CALL quack_serve(
+    'quack:127.0.0.1:9494',
+    allow_other_hostname => true,
+    token => quack_token()
+);
+CALL tailscale_serve_local(port => 9494);
+FROM quack_discover();
+```
+
+**Do not** call `tailscale_down()` or `quackscale_stop()` on a steady-state hub.
+
+### Peer
+
+```sql
+LOAD quack;
+LOAD quackscale;
+
+CALL tailscale_up(
+    hostname    => 'analyst-laptop',
+    control_url => 'http://10.0.0.5:8080',
+    authkey     => 'wbkey-…',
+    state_dir   => '~/.local/share/duckdb/quackscale-client',
+    ephemeral   => true
+);
+
+-- MagicDNS, or the 100.x from the hub's quackscale.nodes
+ATTACH 'quack:analytics-hub.quackscale.local:9494' AS remote (TYPE quack, DISABLE_SSL true);
+
+FROM remote.query('SELECT 42');
+DETACH remote;
+CALL tailscale_down();
+```
+
+If MagicDNS short names fail, use `tailscale_quack_forward(host => 'analytics-hub', …)` or the tailnet IP. Runnable copy: [examples/wirebone](../examples/wirebone/README.md).
 
 ---
 
@@ -356,7 +426,8 @@ Upstream: [duckdb/duckdb#22605](https://github.com/duckdb/duckdb/issues/22605). 
 
 | Demo | Command |
 |------|---------|
-| **Two-node cluster + DuckLake** | [examples/README.md](../examples/README.md) |
+| **Two-process hub (no Docker)** | [examples/wirebone/README.md](../examples/wirebone/README.md) |
+| **Two-node Headscale + DuckLake** | [examples/README.md](../examples/README.md) |
 | **DuckLake compose details** | [examples/ducklake/README.md](../examples/ducklake/README.md) |
 | **Host DuckDB → compose stack** | `scripts/local_remote_headscale_test.sh` |
 | **Network-only probe** | `docker compose --profile debug run --rm tailscale-probe` |

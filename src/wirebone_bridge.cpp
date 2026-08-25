@@ -48,7 +48,7 @@ string NormalizeMagicDnsDomain(const string &domain) {
 		d.pop_back();
 	}
 	if (d.empty()) {
-		return ".wirebone.local";
+		return ".quackscale.local";
 	}
 	if (d.front() != '.') {
 		d = "." + d;
@@ -102,7 +102,7 @@ WireboneServeStatus WireboneBridge::Serve(ClientContext &context, const Wirebone
 #if QUACKSCALE_WITH_WIREBONE
 	std::lock_guard<std::mutex> g(mu);
 	if (coordinator) {
-		throw InvalidInputException("wirebone coordinator already running; CALL wirebone_stop() first");
+		throw InvalidInputException("quackscale hub already running; CALL quackscale_stop() first");
 	}
 
 	string backend = StringUtil::Lower(config.backend);
@@ -110,10 +110,10 @@ WireboneServeStatus WireboneBridge::Serve(ClientContext &context, const Wirebone
 		backend = "duckdb";
 	}
 	if (backend != "duckdb" && backend != "ducklake" && backend != "json") {
-		throw InvalidInputException("wirebone backend must be duckdb, ducklake, or json");
+		throw InvalidInputException("quackscale hub backend must be duckdb, ducklake, or json");
 	}
 	if (backend == "ducklake" && config.catalog.empty()) {
-		throw InvalidInputException("wirebone backend=ducklake requires catalog => '<attached ducklake>'");
+		throw InvalidInputException("quackscale hub backend=ducklake requires catalog => '<attached ducklake>'");
 	}
 
 	const bool use_catalog = backend != "json";
@@ -136,14 +136,14 @@ WireboneServeStatus WireboneBridge::Serve(ClientContext &context, const Wirebone
 	auto *c = wirebone_create(&cfg);
 	if (!c) {
 		catalog.Close();
-		throw IOException("wirebone_serve failed to create coordinator");
+		throw IOException("quackscale_hub failed to create the control plane");
 	}
 	if (use_catalog) {
 		auto snap = catalog.LoadSnapshot();
 		if (!snap.empty() && wirebone_import_state(c, snap.c_str()) != 0) {
 			wirebone_destroy(c);
 			catalog.Close();
-			throw IOException("wirebone_serve failed to import DuckDB snapshot");
+			throw IOException("quackscale_hub failed to import DuckDB snapshot");
 		}
 		wirebone_set_persist_callback(c, PersistToCatalog, &catalog);
 		wirebone_persist(c);
@@ -151,7 +151,7 @@ WireboneServeStatus WireboneBridge::Serve(ClientContext &context, const Wirebone
 	if (wirebone_start(c) != 0) {
 		wirebone_destroy(c);
 		catalog.Close();
-		throw IOException("wirebone_serve failed to start on %s", config.listen);
+		throw IOException("quackscale_hub failed to start on %s", config.listen);
 	}
 
 	coordinator = c;
@@ -196,7 +196,7 @@ string WireboneBridge::BootstrapKey() const {
 #if QUACKSCALE_WITH_WIREBONE
 	std::lock_guard<std::mutex> g(mu);
 	if (!coordinator) {
-		throw InvalidInputException("wirebone coordinator is not running; CALL wirebone_serve() first");
+		throw InvalidInputException("quackscale hub is not running; CALL quackscale_hub() first");
 	}
 	string key = TakeCstr(wirebone_bootstrap_key(static_cast<wirebone_coordinator *>(coordinator)));
 	return key.empty() ? last.preauth_key : key;
@@ -210,13 +210,13 @@ string WireboneBridge::CreatePreauthKey(bool reusable, bool ephemeral) {
 #if QUACKSCALE_WITH_WIREBONE
 	std::lock_guard<std::mutex> g(mu);
 	if (!coordinator) {
-		throw InvalidInputException("wirebone coordinator is not running; CALL wirebone_serve() first");
+		throw InvalidInputException("quackscale hub is not running; CALL quackscale_hub() first");
 	}
 	string key =
 	    TakeCstr(wirebone_create_preauth_key(static_cast<wirebone_coordinator *>(coordinator), reusable ? 1 : 0,
 	                                         ephemeral ? 1 : 0));
 	if (key.empty()) {
-		throw IOException("wirebone_preauth failed to create a key");
+		throw IOException("quackscale_preauth failed to create a key");
 	}
 	if (last.preauth_key.empty()) {
 		last.preauth_key = key;

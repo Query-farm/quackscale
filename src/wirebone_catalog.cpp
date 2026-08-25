@@ -19,9 +19,9 @@ namespace duckdb {
 void WireboneCatalog::Open(ClientContext &context, const WireboneCatalogConfig &config) {
 	Close();
 	if (!config.catalog.empty() && config.catalog != "memory" && config.catalog != "current") {
-		schema = config.catalog + ".wirebone";
+		schema = config.catalog + ".quackscale";
 	} else {
-		schema = "wirebone";
+		schema = "quackscale";
 	}
 	if (!config.database.empty() && config.backend != "ducklake") {
 		owned_db = make_uniq<DuckDB>(config.database);
@@ -35,13 +35,13 @@ void WireboneCatalog::Close() {
 	std::lock_guard<std::mutex> g(write_mu);
 	con.reset();
 	owned_db.reset();
-	schema = "wirebone";
+	schema = "quackscale";
 }
 
 void WireboneCatalog::Run(const string &sql) {
 	auto result = con->Query(sql);
 	if (result->HasError()) {
-		throw IOException("wirebone catalog: %s\n%s", result->GetError(), sql);
+		throw IOException("quackscale hub catalog: %s\n%s", result->GetError(), sql);
 	}
 }
 
@@ -65,6 +65,18 @@ void WireboneCatalog::EnsureSchema() {
 	Run("CREATE TABLE IF NOT EXISTS " + Qualify("nodes") +
 	    " (id UBIGINT PRIMARY KEY, stable_id VARCHAR, hostname VARCHAR, machine_key VARCHAR, node_key VARCHAR, "
 	    "disco_key VARCHAR, ipv4 VARCHAR, ipv6 VARCHAR, endpoints VARCHAR, online BOOLEAN, ephemeral BOOLEAN)");
+
+	// One-cycle alias so older SQL that reads wirebone.* still works.
+	string alias_schema = "wirebone";
+	if (schema.size() > 10 && schema.rfind(".quackscale") == schema.size() - 11) {
+		alias_schema = schema.substr(0, schema.size() - 11) + ".wirebone";
+	}
+	if (alias_schema != schema) {
+		Run("CREATE SCHEMA IF NOT EXISTS " + alias_schema);
+		Run("CREATE OR REPLACE VIEW " + alias_schema + ".meta AS SELECT * FROM " + Qualify("meta"));
+		Run("CREATE OR REPLACE VIEW " + alias_schema + ".preauth_keys AS SELECT * FROM " + Qualify("preauth_keys"));
+		Run("CREATE OR REPLACE VIEW " + alias_schema + ".nodes AS SELECT * FROM " + Qualify("nodes"));
+	}
 }
 
 string WireboneCatalog::LoadSnapshot() {

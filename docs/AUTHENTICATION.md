@@ -4,7 +4,7 @@ QuackTail uses **two independent credential layers**. Both matter in production 
 
 | Layer | Question | Configure with |
 |-------|----------|----------------|
-| **Tailnet** | Is this process on our mesh? | `TS_AUTHKEY`, Headscale preauth key, or browser login → `CALL tailscale_up` |
+| **Tailnet** | Is this process on our mesh? | Tailscale / Headscale / hub key → `CALL tailscale_up`, or `CALL quackscale_hub` |
 | **Quack** | May this caller run SQL over HTTP? | `QUACK_TAILNET_TOKEN`, `CREATE SECRET`, or custom auth macro |
 
 Tailnet ACLs control **who can open TCP to port 9494**. Quack tokens control **who may execute SQL** once connected. See [Quack security](https://duckdb.org/docs/current/quack/security).
@@ -94,40 +94,45 @@ CALL tailscale_up(
 
 ---
 
-## Wirebone (in-process control plane)
+## In-process hub
 
-[Wirebone](https://github.com/lmangani/wirebone.cpp) is a Tailscale/Headscale-compatible coordinator that QuackScale can embed. One DuckDB process hosts the control plane; that same process — and every peer — joins with the existing `tailscale_up` client (libtailscale). No Headscale container and no Tailscale SaaS.
+One DuckDB process can host the Tailscale/Headscale-compatible control plane. That process — and every peer — joins with `tailscale_up`. No Headscale container and no Tailscale SaaS. The library behind the hub is [Wirebone](https://github.com/lmangani/wirebone.cpp); operators do not call it by that name.
 
-Coordinator + client in one process:
+| Job | SQL |
+|-----|-----|
+| This node is the hub (joins by default) | `CALL quackscale_hub(...)` |
+| Hub, control plane only | `CALL quackscale_hub(..., join => false)` |
+| Peer | `CALL tailscale_up(control_url => …, authkey => 'wbkey-…')` |
 
 ```sql
 LOAD quackscale;
 
-CALL quackscale_serve(
-    hostname          => 'duckdb-coord',
-    listen            => '0.0.0.0:8080',
-    server_url        => 'http://10.0.0.5:8080',
-    state_dir         => '/var/lib/duckdb/tailscale'
+CALL quackscale_hub(
+    hostname   => 'duckdb-coord',
+    listen     => '0.0.0.0:8080',
+    server_url => 'http://10.0.0.5:8080',
+    state_dir  => '/var/lib/duckdb/tailscale'
 );
--- coordinator rows: SELECT * FROM wirebone.nodes;
+SELECT * FROM quackscale.nodes;
+SELECT * FROM quackscale.preauth_keys;
 ```
 
-Or two calls: `CALL wirebone_serve(...)` then `CALL tailscale_up(control_url => 'http://127.0.0.1:8080', authkey => wirebone_bootstrap_key(), ...)`.
-
-Peers (client only):
+Peers (client only — they do not start a hub):
 
 ```sql
 CALL tailscale_up(
     hostname    => 'duckdb-node-b',
     control_url => 'http://10.0.0.5:8080',
-    authkey     => 'wbkey-…',   -- from the coordinator's wirebone_preauth / bootstrap key
+    authkey     => 'wbkey-…',   -- FROM quackscale.preauth_keys / quackscale_preauth
     state_dir   => '/var/lib/duckdb/tailscale'
 );
 ```
 
-Create extra keys with `CALL wirebone_preauth(reusable => true)`. Preauth keys and node IPs persist in the `wirebone` schema of this DuckDB (or `backend => 'ducklake', catalog => 'lake'` for a shared catalog). Use `backend => 'json', state_path => '…'` only if you need the standalone file format.
+Create extra keys with `CALL quackscale_preauth(reusable => true)`. Preauth keys and node IPs persist in the `quackscale` schema of this DuckDB (or `backend => 'ducklake', catalog => 'lake'` for a shared catalog). Use `backend => 'json', state_path => '…'` only if you need the standalone file format.
 
-`CALL wirebone_status()` reports `linked=false` if this binary was built without Wirebone (missing sources or OpenSSL/nghttp2/zstd). See [DEVELOPMENT.md](DEVELOPMENT.md).
+`server_url` must be an address **peers can open**. `127.0.0.1` is fine for two processes on one machine; use a LAN or overlay IP for a fleet.
+
+`CALL quackscale_status()` reports `linked=false` if this binary was built without the hub (missing sources or OpenSSL/nghttp2/zstd). See [DEVELOPMENT.md](DEVELOPMENT.md). Local walkthrough: [examples/wirebone](../examples/wirebone/README.md). SQL: [REFERENCE.md](REFERENCE.md#in-process-hub).
 
 ---
 
