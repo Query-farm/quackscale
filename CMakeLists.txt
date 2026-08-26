@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.5)
 set(TARGET_NAME quackscale)
 
 option(QUACKSCALE_WITH_TAILSCALE "Embed libtailscale (requires Go)" ON)
-option(QUACKSCALE_WITH_WIREBONE "Embed Wirebone coordinator when sources + deps are available" ON)
+option(QUACKSCALE_WITH_WIREBONE "Embed Wirebone coordinator (required on POSIX unless OFF)" ON)
 
 set(EXTENSION_NAME ${TARGET_NAME}_extension)
 set(LOADABLE_EXTENSION_NAME ${TARGET_NAME}_loadable_extension)

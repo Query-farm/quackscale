@@ -3,6 +3,7 @@
 #
 name: Main Extension Distribution Pipeline
 on:
+  pull_request:
   release:
   workflow_dispatch:
 

@@ -11,7 +11,7 @@ QuackScale does **not** reimplement Quack. It provides tailnet lifecycle SQL, a 
 ```text
 DuckDB + quackscale + libtailscale
   → tailscale_up, tailscale_quack_forward, quack_uri, attach_ducklake
-DuckDB + quackscale + wirebone (optional hub library)
+DuckDB + quackscale + wirebone (in-process hub)
   → quackscale_hub (control plane + client in one process)
 DuckDB + quack (core)
   → quack_serve, ATTACH, quack_query
@@ -38,7 +38,7 @@ Disable libtailscale (stub build):
 make CMAKE_VARS="-DQUACKSCALE_WITH_TAILSCALE=OFF"
 ```
 
-The in-process hub is enabled automatically on POSIX when `../wirebone.cpp` or `third_party/wirebone` exists and pkg-config can see OpenSSL (`libcrypto`), nghttp2, and libzstd. Hub state is stored in DuckDB tables (`quackscale.meta`, `quackscale.preauth_keys`, `quackscale.nodes`) or in an attached DuckLake catalog. Override the source path with `-DQUACKSCALE_WIREBONE_DIR=…`, or force it off:
+The in-process hub is **on by default** on POSIX. Sources come from `third_party/wirebone` (submodule), a sibling `../wirebone.cpp`, `QUACKSCALE_WIREBONE_DIR`, or a CMake FetchContent of [wirebone.cpp](https://github.com/lmangani/wirebone.cpp). OpenSSL (`libcrypto`), nghttp2, and libzstd are required (`vcpkg.json` supplies them in DuckDB extension CI). Hub state is stored in DuckDB tables (`quackscale.meta`, `quackscale.preauth_keys`, `quackscale.nodes`) or in an attached DuckLake catalog. Force the stub off:
 
 ```sh
 make CMAKE_VARS="-DQUACKSCALE_WITH_WIREBONE=OFF"
@@ -50,8 +50,9 @@ Docker Compose images build from source by default — see [examples/Dockerfile]
 
 ```text
 cmake/Libtailscale.cmake     Go c-archive build + Go 1.25.5 bootstrap
-cmake/Wirebone.cmake          Optional in-process coordinator (sibling or QUACKSCALE_WIREBONE_DIR)
+cmake/Wirebone.cmake          In-process coordinator (submodule, sibling, or FetchContent)
 third_party/libtailscale/     git submodule
+third_party/wirebone/         git submodule (lmangani/wirebone.cpp)
 src/                          C++ extension (bridge, forwarder, attach_ducklake, wirebone catalog)
 scripts/e2e/                  Compose entrypoint, bootstrap, verify-image
 examples/                     Headscale Compose demo; examples/wirebone is local coordinator+peer
@@ -113,7 +114,7 @@ Each Pages deploy replaces the whole site (one DuckDB version hosted). To host m
 | Headscale + Compose e2e | Done |
 | `ATTACH … TYPE quacktail_lake` (Tier 3 native catalog) | Planned |
 | `ducklake_discover()` enriched discovery | Planned |
-| `quackscale_hub()` in-process control plane + client | Done (optional Wirebone build) |
+| `quackscale_hub()` in-process control plane + client | Done (Wirebone; `-DQUACKSCALE_WITH_WIREBONE=OFF` stub) |
 | Community extension descriptor publish | Done (GitHub Pages on release) |
 
 ## Risks
@@ -130,7 +131,7 @@ Each Pages deploy replaces the whole site (one DuckDB version hosted). To host m
 make test
 ```
 
-SQL unit tests do not require a live tailnet. `test/sql/wirebone.test` needs a hub-linked build (`../wirebone.cpp` or `third_party/wirebone`). Two-process hub smoke (CI):
+SQL unit tests do not require a live tailnet. `test/sql/wirebone.test` expects a hub-linked build (`SELECT linked FROM quackscale_status()` is `true`). Two-process hub smoke (CI):
 
 ```sh
 ./scripts/ci_hub_smoke.sh
