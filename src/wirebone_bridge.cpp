@@ -205,16 +205,16 @@ string WireboneBridge::BootstrapKey() const {
 #endif
 }
 
-string WireboneBridge::CreatePreauthKey(bool reusable, bool ephemeral, const string &token, int shared) {
+string WireboneBridge::CreatePreauthKey(bool reusable, bool ephemeral, const string &token, int32_t shared) {
 	RequireLinked();
 #if QUACKSCALE_WITH_WIREBONE
 	std::lock_guard<std::mutex> g(mu);
 	if (!coordinator) {
 		throw InvalidInputException("quackscale hub is not running; CALL quackscale_hub() first");
 	}
-	string key = TakeCstr(wirebone_create_preauth_key_ex(static_cast<wirebone_coordinator *>(coordinator),
-	                                                     reusable ? 1 : 0, ephemeral ? 1 : 0,
-	                                                     token.empty() ? nullptr : token.c_str(), shared));
+	string key =
+	    TakeCstr(wirebone_create_preauth_key_ex(static_cast<wirebone_coordinator *>(coordinator), reusable ? 1 : 0,
+	                                            ephemeral ? 1 : 0, token.empty() ? nullptr : token.c_str(), shared));
 	if (key.empty()) {
 		throw IOException("quackscale_preauth failed to create a key");
 	}
@@ -240,8 +240,7 @@ vector<WireboneNodeRow> WireboneBridge::Nodes() const {
 		return out;
 	}
 	size_t count = 0;
-	wirebone_node_info *nodes =
-	    wirebone_list_nodes(static_cast<const wirebone_coordinator *>(coordinator), &count);
+	wirebone_node_info *nodes = wirebone_list_nodes(static_cast<const wirebone_coordinator *>(coordinator), &count);
 	out.reserve(count);
 	for (size_t i = 0; i < count; ++i) {
 		WireboneNodeRow row;

@@ -122,14 +122,13 @@ void WireboneCatalog::SaveSnapshot(const string &json) {
 		Run("DELETE FROM " + Qualify("preauth_keys"));
 		if (j.contains("preauth_keys")) {
 			for (const auto &k : j["preauth_keys"]) {
-				Run("INSERT INTO " + Qualify("preauth_keys") + " VALUES ('" +
-				    Escape(k.value("key", std::string())) + "', " +
-				    string(k.value("reusable", true) ? "true" : "false") + ", " +
+				Run("INSERT INTO " + Qualify("preauth_keys") + " VALUES ('" + Escape(k.value("key", std::string())) +
+				    "', " + string(k.value("reusable", true) ? "true" : "false") + ", " +
 				    string(k.value("ephemeral", false) ? "true" : "false") + ", " +
 				    string(k.value("used", false) ? "true" : "false") + ", " +
-				    std::to_string(k.value("expires_unix", 0)) + ", '" +
-				    Escape(k.value("token", std::string())) + "', " +
-				    string(k.value("shared", k.value("token", std::string()).empty()) ? "true" : "false") + ")");
+				    std::to_string(k.value("expires_unix", 0)) + ", '" + Escape(k.value("token", std::string())) +
+				    "', " + string(k.value("shared", k.value("token", std::string()).empty()) ? "true" : "false") +
+				    ")");
 			}
 		}
 		Run("DELETE FROM " + Qualify("nodes"));
@@ -140,13 +139,11 @@ void WireboneCatalog::SaveSnapshot(const string &json) {
 					endpoints = n["endpoints"].dump();
 				}
 				Run("INSERT INTO " + Qualify("nodes") + " VALUES (" + std::to_string(n.value("id", 0)) + ", '" +
-				    Escape(n.value("stable_id", std::string())) + "', '" +
-				    Escape(n.value("hostname", std::string())) + "', '" +
-				    Escape(n.value("machine_key", std::string())) + "', '" +
-				    Escape(n.value("node_key", std::string())) + "', '" +
-				    Escape(n.value("disco_key", std::string())) + "', '" + Escape(n.value("ipv4", std::string())) +
-				    "', '" + Escape(n.value("ipv6", std::string())) + "', '" + Escape(endpoints) + "', " +
-				    string(n.value("online", false) ? "true" : "false") + ", " +
+				    Escape(n.value("stable_id", std::string())) + "', '" + Escape(n.value("hostname", std::string())) +
+				    "', '" + Escape(n.value("machine_key", std::string())) + "', '" +
+				    Escape(n.value("node_key", std::string())) + "', '" + Escape(n.value("disco_key", std::string())) +
+				    "', '" + Escape(n.value("ipv4", std::string())) + "', '" + Escape(n.value("ipv6", std::string())) +
+				    "', '" + Escape(endpoints) + "', " + string(n.value("online", false) ? "true" : "false") + ", " +
 				    string(n.value("ephemeral", false) ? "true" : "false") + ", '" +
 				    Escape(n.value("token", std::string())) + "', " +
 				    string(n.value("shared", n.value("token", std::string()).empty()) ? "true" : "false") + ")");

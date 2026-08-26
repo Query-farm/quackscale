@@ -114,7 +114,7 @@ struct WireboneServeBindData : public TableFunctionData {
 };
 
 static unique_ptr<FunctionData> WireboneServeBind(ClientContext &, TableFunctionBindInput &input,
-                                                 vector<LogicalType> &return_types, vector<string> &names) {
+                                                  vector<LogicalType> &return_types, vector<string> &names) {
 	auto bind = make_uniq<WireboneServeBindData>();
 	bind->config = ParseServeConfig(input);
 	return_types = {LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR};
@@ -138,8 +138,8 @@ struct WireboneStatusBindData : public TableFunctionData {
 
 static unique_ptr<FunctionData> WireboneStatusBind(ClientContext &, TableFunctionBindInput &,
                                                    vector<LogicalType> &return_types, vector<string> &names) {
-	return_types = {LogicalType::BOOLEAN, LogicalType::BOOLEAN, LogicalType::VARCHAR, LogicalType::VARCHAR,
-	                LogicalType::VARCHAR, LogicalType::VARCHAR};
+	return_types = {LogicalType::BOOLEAN, LogicalType::BOOLEAN, LogicalType::VARCHAR,
+	                LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR};
 	names = {"linked", "running", "bound", "control_url", "domain", "preauth_key"};
 	return make_uniq<WireboneStatusBindData>();
 }
@@ -186,7 +186,7 @@ struct WirebonePreauthBindData : public TableFunctionData {
 	bool reusable = true;
 	bool ephemeral = false;
 	string token;
-	int shared = -1;
+	int32_t shared = -1;
 	bool finished = false;
 };
 
@@ -266,9 +266,10 @@ static void WireboneBootstrapKeyFunction(DataChunk &, ExpressionState &, Vector 
 	result.Reference(Value(WireboneBridge::Get().BootstrapKey()));
 }
 
-static void RegisterTableAlias(ExtensionLoader &loader, TableFunction fn, const char *name) {
-	fn.name = name;
-	loader.RegisterFunction(fn);
+static void RegisterTableAlias(ExtensionLoader &loader, const TableFunction &fn, const char *name) {
+	TableFunction alias = fn;
+	alias.name = name;
+	loader.RegisterFunction(alias);
 }
 
 struct QuackscaleServeBindData : public TableFunctionData {
@@ -286,8 +287,13 @@ static unique_ptr<FunctionData> QuackscaleServeBind(ClientContext &, TableFuncti
 	bind->join = ParseJoinConfig(input);
 	bind->do_join = NamedBool(input, "join", true);
 	bind->http_route = NamedBool(input, "http_route", true);
-	return_types = {LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR,
-	                LogicalType::BOOLEAN, LogicalType::VARCHAR, LogicalType::LIST(LogicalType::VARCHAR)};
+	return_types = {LogicalType::VARCHAR,
+	                LogicalType::VARCHAR,
+	                LogicalType::VARCHAR,
+	                LogicalType::VARCHAR,
+	                LogicalType::BOOLEAN,
+	                LogicalType::VARCHAR,
+	                LogicalType::LIST(LogicalType::VARCHAR)};
 	names = {"bound", "control_url", "domain", "preauth_key", "running", "hostname", "tailnet_ips"};
 	return std::move(bind);
 }

@@ -21,8 +21,13 @@ if(QUACKSCALE_WITH_TAILSCALE)
     include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/Libtailscale.cmake)
 endif()
 
-if(QUACKSCALE_WITH_WIREBONE)
+# Code-quality CI (`make tidy-check`) configures without vcpkg, so Wirebone's
+# required OpenSSL/nghttp2/zstd lookup would FATAL_ERROR. Real builds still
+# fail closed; clang-tidy only needs compile_commands for src/.
+if(QUACKSCALE_WITH_WIREBONE AND NOT CLANG_TIDY)
     include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/Wirebone.cmake)
+elseif(CLANG_TIDY AND QUACKSCALE_WITH_WIREBONE)
+    message(STATUS "QuackScale: skipping Wirebone configure for clang-tidy")
 endif()
 
 build_static_extension(${TARGET_NAME} ${EXTENSION_SOURCES})
