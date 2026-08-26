@@ -115,16 +115,63 @@ if(NOT TARGET wirebone)
 endif()
 target_compile_definitions(wirebone PRIVATE WIREBONE_DUCKDB_ZSTD=1)
 
+# DuckDB's extension compile line does not follow CMake imported targets, so
+# nlohmann's INTERFACE includes never reached wirebone_catalog.cpp. Resolve a
+# real -I path (vcpkg or Wirebone's FetchContent) and pass it explicitly.
+set(_qs_nlohmann_hints "")
+if(DEFINED nlohmann_json_SOURCE_DIR)
+    list(APPEND _qs_nlohmann_hints
+        "${nlohmann_json_SOURCE_DIR}/include"
+        "${nlohmann_json_SOURCE_DIR}/single_include")
+endif()
+if(VCPKG_TARGET_TRIPLET)
+    list(APPEND _qs_nlohmann_hints "${CMAKE_BINARY_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/include")
+endif()
+if(DEFINED ENV{VCPKG_TARGET_TRIPLET} AND NOT "$ENV{VCPKG_TARGET_TRIPLET}" STREQUAL "")
+    list(APPEND _qs_nlohmann_hints "${CMAKE_BINARY_DIR}/vcpkg_installed/$ENV{VCPKG_TARGET_TRIPLET}/include")
+endif()
+if(DEFINED ENV{VCPKG_INSTALLED_DIR} AND DEFINED ENV{VCPKG_TARGET_TRIPLET})
+    list(APPEND _qs_nlohmann_hints "$ENV{VCPKG_INSTALLED_DIR}/$ENV{VCPKG_TARGET_TRIPLET}/include")
+endif()
+if(DEFINED ENV{OPENSSL_ROOT_DIR} AND NOT "$ENV{OPENSSL_ROOT_DIR}" STREQUAL "")
+    list(APPEND _qs_nlohmann_hints "$ENV{OPENSSL_ROOT_DIR}/include")
+endif()
+list(APPEND _qs_nlohmann_hints
+    "${CMAKE_BINARY_DIR}/third_party/wirebone/_deps/nlohmann_json-src/include"
+    "${CMAKE_BINARY_DIR}/third_party/wirebone/_deps/nlohmann_json-src/single_include"
+    "${CMAKE_BINARY_DIR}/_deps/nlohmann_json-src/include"
+    "${CMAKE_BINARY_DIR}/_deps/nlohmann_json-src/single_include")
+
+set(QUACKSCALE_NLOHMANN_INCLUDE_DIR "")
+foreach(_qs_nl_hint IN LISTS _qs_nlohmann_hints)
+    if(EXISTS "${_qs_nl_hint}/nlohmann/json.hpp")
+        set(QUACKSCALE_NLOHMANN_INCLUDE_DIR "${_qs_nl_hint}")
+        break()
+    endif()
+endforeach()
+if(NOT QUACKSCALE_NLOHMANN_INCLUDE_DIR)
+    find_path(QUACKSCALE_NLOHMANN_INCLUDE_DIR nlohmann/json.hpp)
+endif()
+if(NOT QUACKSCALE_NLOHMANN_INCLUDE_DIR)
+    message(FATAL_ERROR
+        "QuackScale: nlohmann/json.hpp not found (wirebone_catalog.cpp). "
+        "vcpkg.json already lists nlohmann-json; check vcpkg_installed includes.")
+endif()
+message(STATUS "QuackScale: nlohmann/json.hpp from ${QUACKSCALE_NLOHMANN_INCLUDE_DIR}")
 message(STATUS "QuackScale: Wirebone coordinator from ${QUACKSCALE_WIREBONE_SOURCE}")
+
+# DuckDB compiles extension TUs as C++11; nlohmann needs at least C++14 on recent GCC.
+set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/src/wirebone_catalog.cpp"
+    PROPERTIES COMPILE_OPTIONS "-std=c++17")
 
 function(quackscale_link_wirebone target_name)
     target_compile_definitions(${target_name} PRIVATE QUACKSCALE_WITH_WIREBONE=1)
-    target_include_directories(${target_name} PRIVATE "${QUACKSCALE_WIREBONE_SOURCE}/include")
-    if(TARGET nlohmann_json)
-        get_target_property(_qs_nlohmann_inc nlohmann_json INTERFACE_INCLUDE_DIRECTORIES)
-        if(_qs_nlohmann_inc)
-            target_include_directories(${target_name} PRIVATE ${_qs_nlohmann_inc})
-        endif()
+    target_include_directories(${target_name} PRIVATE
+        "${QUACKSCALE_WIREBONE_SOURCE}/include"
+        "${QUACKSCALE_NLOHMANN_INCLUDE_DIR}")
+    if(TARGET nlohmann_json::nlohmann_json)
+        target_include_directories(${target_name} PRIVATE
+            "$<TARGET_PROPERTY:nlohmann_json::nlohmann_json,INTERFACE_INCLUDE_DIRECTORIES>")
     endif()
     add_dependencies(${target_name} wirebone)
     # Archive + absolute dylibs so DuckDB's custom extension link line sees them
